@@ -12,6 +12,9 @@ export interface AuditExtractionMetrics {
   avg_leads_found: number;
   avg_duration_seconds: number;
   filtered_non_b2b_total: number;
+  filtered_out_total: number;
+  classified_b2b_total: number;
+  classified_b2c_total: number;
 }
 
 export interface AuditSummary {

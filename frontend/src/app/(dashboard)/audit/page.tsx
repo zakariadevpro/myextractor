@@ -139,12 +139,12 @@ export default function AuditPage() {
           helper="Moyenne de leads par job complete"
         />
         <MetricCard
-          label="Filtres non-B2B"
-          value={summaryLoading ? "..." : extractionMetrics?.filtered_non_b2b_total ?? 0}
+          label="Leads filtres"
+          value={summaryLoading ? "..." : extractionMetrics?.filtered_out_total ?? 0}
           helper={
             summaryLoading
               ? "..."
-              : `Duree moyenne ${extractionMetrics?.avg_duration_seconds ?? 0}s`
+              : `Classifies B2B ${extractionMetrics?.classified_b2b_total ?? 0} / B2C ${extractionMetrics?.classified_b2c_total ?? 0}`
           }
         />
       </div>

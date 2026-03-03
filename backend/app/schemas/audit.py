@@ -31,6 +31,9 @@ class AuditExtractionMetrics(BaseModel):
     avg_leads_found: float
     avg_duration_seconds: float
     filtered_non_b2b_total: int
+    filtered_out_total: int
+    classified_b2b_total: int
+    classified_b2c_total: int
 
 
 class AuditSummaryResponse(BaseModel):

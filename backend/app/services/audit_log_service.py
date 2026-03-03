@@ -146,11 +146,48 @@ class AuditLogService:
                 )
             )
         ).scalar() or 0.0
-        filtered_non_b2b_total = (
+        filtered_out_total = (
             await self.db.execute(
                 text(
                     """
-                    SELECT COALESCE(SUM(COALESCE(NULLIF(details->>'filtered_non_b2b', '')::int, 0)), 0)
+                    SELECT COALESCE(
+                      SUM(
+                        COALESCE(
+                          NULLIF(details->>'filtered_out', '')::int,
+                          NULLIF(details->>'filtered_non_b2b', '')::int,
+                          0
+                        )
+                      ),
+                      0
+                    )
+                    FROM audit_logs
+                    WHERE organization_id = :org_id
+                      AND action = 'extraction.analytics'
+                      AND created_at >= :since
+                    """
+                ),
+                {"org_id": organization_id, "since": since},
+            )
+        ).scalar() or 0
+        classified_b2b_total = (
+            await self.db.execute(
+                text(
+                    """
+                    SELECT COALESCE(SUM(COALESCE(NULLIF(details->>'classified_b2b', '')::int, 0)), 0)
+                    FROM audit_logs
+                    WHERE organization_id = :org_id
+                      AND action = 'extraction.analytics'
+                      AND created_at >= :since
+                    """
+                ),
+                {"org_id": organization_id, "since": since},
+            )
+        ).scalar() or 0
+        classified_b2c_total = (
+            await self.db.execute(
+                text(
+                    """
+                    SELECT COALESCE(SUM(COALESCE(NULLIF(details->>'classified_b2c', '')::int, 0)), 0)
                     FROM audit_logs
                     WHERE organization_id = :org_id
                       AND action = 'extraction.analytics'
@@ -179,6 +216,9 @@ class AuditLogService:
                 "success_rate_pct": round(success_rate, 2),
                 "avg_leads_found": round(float(avg_leads_found), 2),
                 "avg_duration_seconds": round(float(avg_duration_seconds), 2),
-                "filtered_non_b2b_total": int(filtered_non_b2b_total),
+                "filtered_non_b2b_total": int(filtered_out_total),
+                "filtered_out_total": int(filtered_out_total),
+                "classified_b2b_total": int(classified_b2b_total),
+                "classified_b2c_total": int(classified_b2c_total),
             },
         }

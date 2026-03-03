@@ -35,6 +35,9 @@ export function useAuditSummary(sinceHours = 24) {
         avg_leads_found: 0,
         avg_duration_seconds: 0,
         filtered_non_b2b_total: 0,
+        filtered_out_total: 0,
+        classified_b2b_total: 0,
+        classified_b2c_total: 0,
       },
     },
   });

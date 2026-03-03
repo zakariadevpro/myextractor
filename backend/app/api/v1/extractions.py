@@ -39,7 +39,8 @@ async def create_extraction(
         resource_id=str(job.id),
         details={
             "source": data.source,
-            "keywords_count": len(data.keywords),
+            "target_kind": data.target_kind,
+            "keywords_count": len(job.keywords or []),
             "max_leads": data.max_leads,
         },
     )

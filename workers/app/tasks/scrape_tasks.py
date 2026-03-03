@@ -225,6 +225,14 @@ def _has_professional_email(lead: ScrapedLead) -> bool:
     return False
 
 
+def _has_personal_email(lead: ScrapedLead) -> bool:
+    for email in lead.emails or []:
+        domain = _email_domain(email)
+        if domain and domain in PERSONAL_EMAIL_DOMAINS:
+            return True
+    return False
+
+
 def _website_domain(website: str | None) -> str:
     canonical = _canonical_website(website)
     if not canonical:
@@ -435,17 +443,79 @@ def _is_b2b_candidate(lead: ScrapedLead) -> bool:
     return False
 
 
-def _enforce_b2b_only(leads: list[ScrapedLead]) -> tuple[list[ScrapedLead], int]:
-    if not settings.b2b_strict_mode:
-        return leads, 0
-    kept: list[ScrapedLead] = []
-    filtered_out = 0
+def _normalize_target_kind(target_kind: str | None) -> str:
+    value = str(target_kind or "both").strip().lower()
+    if value not in {"b2b", "b2c", "both"}:
+        return "both"
+    return value
+
+
+def _classify_lead_kind(lead: ScrapedLead) -> str:
+    b2b_signal = _is_b2b_candidate(lead)
+    b2c_signal = _is_likely_individual_name(lead.company_name) or (
+        _has_personal_email(lead) and not _has_professional_email(lead)
+    )
+    if b2b_signal and not b2c_signal:
+        return "b2b"
+    if b2c_signal and not b2b_signal:
+        return "b2c"
+    if b2b_signal and b2c_signal:
+        # Mixed signal: keep as B2B if there is an official/company indicator.
+        if lead.siren or lead.naf_code or _has_business_name_hints(lead.company_name):
+            return "b2b"
+        return "b2c"
+    return "unknown"
+
+
+def _filter_by_target_kind(
+    leads: list[ScrapedLead],
+    target_kind: str,
+) -> tuple[list[tuple[ScrapedLead, str]], dict[str, int]]:
+    selected: list[tuple[ScrapedLead, str]] = []
+    counts = {
+        "raw": len(leads),
+        "class_b2b": 0,
+        "class_b2c": 0,
+        "class_unknown": 0,
+        "filtered_out": 0,
+    }
+    normalized_target = _normalize_target_kind(target_kind)
+    strict_unknown = bool(settings.b2b_strict_mode)
+
     for lead in leads:
-        if _is_b2b_candidate(lead):
-            kept.append(lead)
+        classified = _classify_lead_kind(lead)
+        if classified == "b2b":
+            counts["class_b2b"] += 1
+        elif classified == "b2c":
+            counts["class_b2c"] += 1
         else:
-            filtered_out += 1
-    return kept, filtered_out
+            counts["class_unknown"] += 1
+
+        keep = False
+        stored_kind = classified if classified in {"b2b", "b2c"} else "b2b"
+
+        if normalized_target == "both":
+            if classified in {"b2b", "b2c"}:
+                keep = True
+            elif not strict_unknown:
+                keep = True
+                stored_kind = "b2b"
+        elif normalized_target == "b2b":
+            if classified == "b2b":
+                keep = True
+            elif classified == "unknown" and not strict_unknown:
+                keep = True
+                stored_kind = "b2b"
+        elif normalized_target == "b2c":
+            if classified == "b2c":
+                keep = True
+
+        if keep:
+            selected.append((lead, stored_kind))
+        else:
+            counts["filtered_out"] += 1
+
+    return selected, counts
 
 
 def _lead_key(lead: ScrapedLead) -> str | None:
@@ -767,7 +837,7 @@ def _run_post_extraction_workflows(db, organization_id: str, job_id: str) -> dic
     max_retries=2,
     default_retry_delay=30,
 )
-def execute_scraping(self, job_id: str):
+def execute_scraping(self, job_id: str, target_kind: str = "both"):
     """Execute a scraping job."""
     db = SessionLocal()
     job_started_monotonic = time.monotonic()
@@ -799,6 +869,7 @@ def execute_scraping(self, job_id: str):
         radius_km = job["radius_km"]
         max_leads = job["max_leads"] or 100
         source = job["source"] or "google_maps"
+        target_kind = _normalize_target_kind(target_kind)
         scoring_weights = _load_scoring_weights(db, str(job["organization_id"]))
 
         if source == "whiteextractor":
@@ -826,24 +897,30 @@ def execute_scraping(self, job_id: str):
             )
 
         raw_scraped_count = len(scraped_leads)
-        scraped_leads, filtered_non_b2b = _enforce_b2b_only(scraped_leads)
-        if len(scraped_leads) > max_leads:
-            scraped_leads = scraped_leads[:max_leads]
-        leads_with_phone = sum(1 for lead in scraped_leads if lead.phones)
-        leads_with_pro_email = sum(1 for lead in scraped_leads if _professional_email_count(lead) > 0)
+        selected_leads, filter_counts = _filter_by_target_kind(scraped_leads, target_kind)
+        if len(selected_leads) > max_leads:
+            selected_leads = selected_leads[:max_leads]
+        leads_with_phone = sum(1 for lead, _ in selected_leads if lead.phones)
+        leads_with_pro_email = sum(
+            1 for lead, _ in selected_leads if _professional_email_count(lead) > 0
+        )
         logger.info(
-            "Job %s B2B filtering: raw=%s kept=%s filtered_non_b2b=%s",
+            "Job %s target_kind=%s filtering: raw=%s kept=%s filtered_out=%s (b2b=%s b2c=%s unknown=%s)",
             job_id,
-            raw_scraped_count,
-            len(scraped_leads),
-            filtered_non_b2b,
+            target_kind,
+            filter_counts["raw"],
+            len(selected_leads),
+            filter_counts["filtered_out"],
+            filter_counts["class_b2b"],
+            filter_counts["class_b2c"],
+            filter_counts["class_unknown"],
         )
 
         # Store leads in database
         leads_new = 0
         leads_duplicate = 0
 
-        for scraped in scraped_leads:
+        for scraped, detected_lead_kind in selected_leads:
             # Check for duplicates (same name + city in same org)
             dup_check = db.execute(
                 text("""
@@ -880,11 +957,11 @@ def execute_scraping(self, job_id: str):
                     INSERT INTO leads (
                         id, organization_id, extraction_job_id, company_name,
                         siren, naf_code, sector, website, address, postal_code,
-                        city, department, region, country, source, source_url, is_duplicate, quality_score
+                        city, department, region, country, source, source_url, lead_kind, is_duplicate, quality_score
                     ) VALUES (
                         :id, :org_id, :job_id, :name,
                         :siren, :naf, :sector, :website, :address, :postal,
-                        :city, :dept, :region, 'FR', :source, :source_url, :is_dup, :quality_score
+                        :city, :dept, :region, 'FR', :source, :source_url, :lead_kind, :is_dup, :quality_score
                     )
                 """),
                 {
@@ -903,6 +980,7 @@ def execute_scraping(self, job_id: str):
                     "region": scraped.region or None,
                     "source": source,
                     "source_url": scraped.source_url or None,
+                    "lead_kind": detected_lead_kind,
                     "is_dup": is_duplicate,
                     "quality_score": quality_score,
                 },
@@ -1017,11 +1095,15 @@ def execute_scraping(self, job_id: str):
                 "details": json.dumps(
                     {
                         "source": source,
+                        "target_kind": target_kind,
                         "keywords_count": len(keywords),
                         "max_leads": max_leads,
                         "raw_scraped": raw_scraped_count,
-                        "filtered_non_b2b": filtered_non_b2b,
-                        "kept_b2b": len(scraped_leads),
+                        "kept_after_filter": len(selected_leads),
+                        "filtered_out": filter_counts["filtered_out"],
+                        "classified_b2b": filter_counts["class_b2b"],
+                        "classified_b2c": filter_counts["class_b2c"],
+                        "classified_unknown": filter_counts["class_unknown"],
                         "with_phone": leads_with_phone,
                         "with_professional_email": leads_with_pro_email,
                         "leads_new": leads_new,

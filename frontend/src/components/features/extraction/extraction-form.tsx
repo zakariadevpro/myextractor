@@ -1,10 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { X, Plus, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,208 +10,441 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SECTORS, SOURCES } from "@/lib/constants";
 import { useCreateExtraction } from "@/hooks/use-extraction";
 
-const extractionSchema = z.object({
-  source: z.string().min(1, "La source est requise"),
-  city: z.string().min(1, "La ville est requise"),
-  radius_km: z
-    .number({ invalid_type_error: "Le rayon est requis" })
-    .min(1, "Minimum 1 km")
-    .max(100, "Maximum 100 km"),
-  sector_filter: z.string().optional(),
-  max_leads: z
-    .number({ invalid_type_error: "Le nombre est requis" })
-    .min(1, "Minimum 1 lead")
-    .max(1000, "Maximum 1 000 leads"),
-});
-
-type ExtractionFormData = z.infer<typeof extractionSchema>;
-
-interface ExtractionFormProps {
-  onSuccess?: () => void;
+function parseKeywordText(raw: string): string[] {
+  const seen = new Set<string>();
+  const values = raw
+    .replace(/\n/g, ",")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const deduped: string[] = [];
+  for (const item of values) {
+    const key = item.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  return deduped;
 }
 
-export function ExtractionForm({ onSuccess }: ExtractionFormProps) {
-  const [keywords, setKeywords] = useState<string[]>([]);
-  const [keywordInput, setKeywordInput] = useState("");
+interface CommonFormFields {
+  source: string;
+  city: string;
+  postal_code: string;
+  department: string;
+  radius_km: number;
+  max_leads: number;
+  keywords: string;
+}
+
+interface B2BFields extends CommonFormFields {
+  company_name: string;
+  sector_filter: string;
+}
+
+interface B2CFields extends CommonFormFields {
+  first_name: string;
+  last_name: string;
+}
+
+interface BothFields extends CommonFormFields {
+  company_name: string;
+  first_name: string;
+  last_name: string;
+  sector_filter: string;
+}
+
+export function ExtractionForm() {
   const createExtraction = useCreateExtraction();
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors },
-  } = useForm<ExtractionFormData>({
-    resolver: zodResolver(extractionSchema),
-    defaultValues: {
-      source: "whiteextractor",
-      city: "",
-      radius_km: 20,
-      sector_filter: "",
-      max_leads: 100,
-    },
-  });
-
-  const addKeyword = () => {
-    const trimmed = keywordInput.trim();
-    if (trimmed && !keywords.includes(trimmed)) {
-      setKeywords([...keywords, trimmed]);
-      setKeywordInput("");
-    }
-  };
-
-  const removeKeyword = (keyword: string) => {
-    setKeywords(keywords.filter((k) => k !== keyword));
-  };
-
-  const handleKeywordKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      addKeyword();
-    }
-  };
-
   const sourceOptions = SOURCES.map((s) => ({ value: s.value, label: s.label }));
   const sectorOptions = SECTORS.map((s) => ({ value: s, label: s }));
 
-  const onSubmit = async (data: ExtractionFormData) => {
-    if (keywords.length === 0) {
-      toast.error("Ajoutez au moins un mot-cle.");
+  const [b2b, setB2B] = useState<B2BFields>({
+    source: "whiteextractor",
+    company_name: "",
+    keywords: "",
+    city: "",
+    postal_code: "",
+    department: "",
+    radius_km: 20,
+    sector_filter: "",
+    max_leads: 100,
+  });
+
+  const [b2c, setB2C] = useState<B2CFields>({
+    source: "whiteextractor",
+    first_name: "",
+    last_name: "",
+    keywords: "",
+    city: "",
+    postal_code: "",
+    department: "",
+    radius_km: 20,
+    max_leads: 100,
+  });
+
+  const [both, setBoth] = useState<BothFields>({
+    source: "whiteextractor",
+    company_name: "",
+    first_name: "",
+    last_name: "",
+    keywords: "",
+    city: "",
+    postal_code: "",
+    department: "",
+    radius_km: 20,
+    sector_filter: "",
+    max_leads: 100,
+  });
+
+  const submitB2B = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const keywords = parseKeywordText(b2b.keywords);
+    if (!b2b.company_name.trim() && keywords.length === 0) {
+      toast.error("B2B: saisis une raison sociale ou des mots-cles.");
       return;
     }
-
     try {
       await createExtraction.mutateAsync({
-        source: data.source,
+        source: b2b.source,
+        target_kind: "b2b",
+        company_name: b2b.company_name.trim() || undefined,
         keywords,
-        city: data.city,
-        radius_km: data.radius_km,
-        sector_filter: data.sector_filter || undefined,
-        max_leads: data.max_leads,
+        city: b2b.city.trim() || undefined,
+        postal_code: b2b.postal_code.trim() || undefined,
+        department: b2b.department.trim() || undefined,
+        radius_km: b2b.radius_km,
+        sector_filter: b2b.sector_filter.trim() || undefined,
+        max_leads: b2b.max_leads,
       });
-      toast.success("Extraction lancee avec succes !");
-      setKeywords([]);
-      reset();
-      onSuccess?.();
+      toast.success("Extraction B2B lancee.");
     } catch {
-      toast.error("Erreur lors du lancement de l'extraction.");
+      toast.error("Erreur lancement B2B.");
+    }
+  };
+
+  const submitB2C = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const keywords = parseKeywordText(b2c.keywords);
+    if (!b2c.first_name.trim() && !b2c.last_name.trim() && keywords.length === 0) {
+      toast.error("B2C: saisis prenom/nom ou des mots-cles.");
+      return;
+    }
+    try {
+      await createExtraction.mutateAsync({
+        source: b2c.source,
+        target_kind: "b2c",
+        first_name: b2c.first_name.trim() || undefined,
+        last_name: b2c.last_name.trim() || undefined,
+        keywords,
+        city: b2c.city.trim() || undefined,
+        postal_code: b2c.postal_code.trim() || undefined,
+        department: b2c.department.trim() || undefined,
+        radius_km: b2c.radius_km,
+        max_leads: b2c.max_leads,
+      });
+      toast.success("Extraction B2C lancee.");
+    } catch {
+      toast.error("Erreur lancement B2C.");
+    }
+  };
+
+  const submitBoth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const keywords = parseKeywordText(both.keywords);
+    const hasB2B = !!both.company_name.trim();
+    const hasB2C = !!both.first_name.trim() || !!both.last_name.trim();
+    if (!hasB2B && !hasB2C && keywords.length === 0) {
+      toast.error("Mixte: renseigne raison sociale, nom/prenom ou mots-cles.");
+      return;
+    }
+    try {
+      await createExtraction.mutateAsync({
+        source: both.source,
+        target_kind: "both",
+        company_name: both.company_name.trim() || undefined,
+        first_name: both.first_name.trim() || undefined,
+        last_name: both.last_name.trim() || undefined,
+        keywords,
+        city: both.city.trim() || undefined,
+        postal_code: both.postal_code.trim() || undefined,
+        department: both.department.trim() || undefined,
+        radius_km: both.radius_km,
+        sector_filter: both.sector_filter.trim() || undefined,
+        max_leads: both.max_leads,
+      });
+      toast.success("Extraction mixte lancee.");
+    } catch {
+      toast.error("Erreur lancement mixte.");
     }
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Search className="h-5 w-5 text-primary" />
-          Nouvelle extraction
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          {/* Source Selector */}
-          <Select
-            id="source"
-            label="Source de donnees"
-            options={sourceOptions}
-            error={errors.source?.message}
-            {...register("source")}
-          />
-
-          {/* Keywords Tag Input */}
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">
-              Mots-cles
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={keywordInput}
-                onChange={(e) => setKeywordInput(e.target.value)}
-                onKeyDown={handleKeywordKeyDown}
-                placeholder="Ajouter un mot-cle..."
-                className="flex h-10 flex-1 rounded-md border border-border bg-white px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Mode B2B - Societes</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submitB2B} className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Select
+                id="b2b-source"
+                label="Source"
+                options={sourceOptions}
+                value={b2b.source}
+                onChange={(e) => setB2B((prev) => ({ ...prev, source: e.target.value }))}
               />
-              <Button type="button" variant="outline" onClick={addKeyword}>
-                <Plus className="h-4 w-4" />
-              </Button>
+              <Input
+                id="b2b-company"
+                label="Raison sociale"
+                placeholder="Ex: Dupont Services"
+                value={b2b.company_name}
+                onChange={(e) => setB2B((prev) => ({ ...prev, company_name: e.target.value }))}
+              />
+              <Input
+                id="b2b-city"
+                label="Ville"
+                placeholder="Paris"
+                value={b2b.city}
+                onChange={(e) => setB2B((prev) => ({ ...prev, city: e.target.value }))}
+              />
+              <Input
+                id="b2b-postal"
+                label="Code postal"
+                placeholder="75001"
+                value={b2b.postal_code}
+                onChange={(e) => setB2B((prev) => ({ ...prev, postal_code: e.target.value }))}
+              />
+              <Input
+                id="b2b-department"
+                label="Departement"
+                placeholder="75"
+                value={b2b.department}
+                onChange={(e) => setB2B((prev) => ({ ...prev, department: e.target.value }))}
+              />
+              <Select
+                id="b2b-sector"
+                label="Secteur"
+                placeholder="Choisir un secteur"
+                options={sectorOptions}
+                value={b2b.sector_filter}
+                onChange={(e) => setB2B((prev) => ({ ...prev, sector_filter: e.target.value }))}
+              />
+              <Input
+                id="b2b-radius"
+                label="Rayon (km)"
+                type="number"
+                value={b2b.radius_km}
+                onChange={(e) =>
+                  setB2B((prev) => ({ ...prev, radius_km: Number(e.target.value) || 1 }))
+                }
+              />
+              <Input
+                id="b2b-max"
+                label="Max leads"
+                type="number"
+                value={b2b.max_leads}
+                onChange={(e) =>
+                  setB2B((prev) => ({ ...prev, max_leads: Number(e.target.value) || 1 }))
+                }
+              />
             </div>
-            {keywords.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {keywords.map((keyword) => (
-                  <span
-                    key={keyword}
-                    className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-3 py-1 text-sm font-medium text-primary-700"
-                  >
-                    {keyword}
-                    <button
-                      type="button"
-                      onClick={() => removeKeyword(keyword)}
-                      className="rounded-full p-0.5 hover:bg-primary-100"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-            {keywords.length === 0 && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Appuyez sur Entree ou cliquez + pour ajouter un mot-cle
-              </p>
-            )}
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            {/* City */}
             <Input
-              id="city"
-              label="Ville"
-              placeholder="Paris"
-              error={errors.city?.message}
-              {...register("city")}
+              id="b2b-keywords"
+              label="Mots-cles (optionnel, separes par virgules)"
+              placeholder="plomberie, depannage, urgent"
+              value={b2b.keywords}
+              onChange={(e) => setB2B((prev) => ({ ...prev, keywords: e.target.value }))}
             />
+            <Button type="submit" className="w-full gap-2" isLoading={createExtraction.isPending}>
+              <Search className="h-4 w-4" />
+              Lancer Extraction B2B
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
-            {/* Radius */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Mode B2C - Particuliers</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submitB2C} className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Select
+                id="b2c-source"
+                label="Source"
+                options={sourceOptions}
+                value={b2c.source}
+                onChange={(e) => setB2C((prev) => ({ ...prev, source: e.target.value }))}
+              />
+              <Input
+                id="b2c-first"
+                label="Prenom"
+                placeholder="Jean"
+                value={b2c.first_name}
+                onChange={(e) => setB2C((prev) => ({ ...prev, first_name: e.target.value }))}
+              />
+              <Input
+                id="b2c-last"
+                label="Nom"
+                placeholder="Dupont"
+                value={b2c.last_name}
+                onChange={(e) => setB2C((prev) => ({ ...prev, last_name: e.target.value }))}
+              />
+              <Input
+                id="b2c-city"
+                label="Ville"
+                placeholder="Paris"
+                value={b2c.city}
+                onChange={(e) => setB2C((prev) => ({ ...prev, city: e.target.value }))}
+              />
+              <Input
+                id="b2c-postal"
+                label="Code postal"
+                placeholder="75001"
+                value={b2c.postal_code}
+                onChange={(e) => setB2C((prev) => ({ ...prev, postal_code: e.target.value }))}
+              />
+              <Input
+                id="b2c-department"
+                label="Departement"
+                placeholder="75"
+                value={b2c.department}
+                onChange={(e) => setB2C((prev) => ({ ...prev, department: e.target.value }))}
+              />
+              <Input
+                id="b2c-radius"
+                label="Rayon (km)"
+                type="number"
+                value={b2c.radius_km}
+                onChange={(e) =>
+                  setB2C((prev) => ({ ...prev, radius_km: Number(e.target.value) || 1 }))
+                }
+              />
+              <Input
+                id="b2c-max"
+                label="Max leads"
+                type="number"
+                value={b2c.max_leads}
+                onChange={(e) =>
+                  setB2C((prev) => ({ ...prev, max_leads: Number(e.target.value) || 1 }))
+                }
+              />
+            </div>
             <Input
-              id="radius_km"
-              label="Rayon (km)"
-              type="number"
-              placeholder="20"
-              error={errors.radius_km?.message}
-              {...register("radius_km", { valueAsNumber: true })}
+              id="b2c-keywords"
+              label="Mots-cles (optionnel)"
+              placeholder="assurance, credit, mutuelle"
+              value={b2c.keywords}
+              onChange={(e) => setB2C((prev) => ({ ...prev, keywords: e.target.value }))}
             />
+            <Button type="submit" className="w-full gap-2" isLoading={createExtraction.isPending}>
+              <Search className="h-4 w-4" />
+              Lancer Extraction B2C
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
-            {/* Sector */}
-            <Select
-              id="sector_filter"
-              label="Secteur (optionnel)"
-              placeholder="Choisir un secteur"
-              options={sectorOptions}
-              error={errors.sector_filter?.message}
-              {...register("sector_filter")}
-            />
-
-            {/* Max leads */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Mode Mixte - B2B + B2C</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submitBoth} className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Select
+                id="both-source"
+                label="Source"
+                options={sourceOptions}
+                value={both.source}
+                onChange={(e) => setBoth((prev) => ({ ...prev, source: e.target.value }))}
+              />
+              <Input
+                id="both-company"
+                label="Raison sociale"
+                placeholder="Ex: Alpha Conseil"
+                value={both.company_name}
+                onChange={(e) => setBoth((prev) => ({ ...prev, company_name: e.target.value }))}
+              />
+              <Input
+                id="both-first"
+                label="Prenom"
+                placeholder="Jean"
+                value={both.first_name}
+                onChange={(e) => setBoth((prev) => ({ ...prev, first_name: e.target.value }))}
+              />
+              <Input
+                id="both-last"
+                label="Nom"
+                placeholder="Dupont"
+                value={both.last_name}
+                onChange={(e) => setBoth((prev) => ({ ...prev, last_name: e.target.value }))}
+              />
+              <Input
+                id="both-city"
+                label="Ville"
+                placeholder="Paris"
+                value={both.city}
+                onChange={(e) => setBoth((prev) => ({ ...prev, city: e.target.value }))}
+              />
+              <Input
+                id="both-postal"
+                label="Code postal"
+                placeholder="75001"
+                value={both.postal_code}
+                onChange={(e) => setBoth((prev) => ({ ...prev, postal_code: e.target.value }))}
+              />
+              <Input
+                id="both-department"
+                label="Departement"
+                placeholder="75"
+                value={both.department}
+                onChange={(e) => setBoth((prev) => ({ ...prev, department: e.target.value }))}
+              />
+              <Select
+                id="both-sector"
+                label="Secteur"
+                placeholder="Choisir un secteur"
+                options={sectorOptions}
+                value={both.sector_filter}
+                onChange={(e) => setBoth((prev) => ({ ...prev, sector_filter: e.target.value }))}
+              />
+              <Input
+                id="both-radius"
+                label="Rayon (km)"
+                type="number"
+                value={both.radius_km}
+                onChange={(e) =>
+                  setBoth((prev) => ({ ...prev, radius_km: Number(e.target.value) || 1 }))
+                }
+              />
+              <Input
+                id="both-max"
+                label="Max leads"
+                type="number"
+                value={both.max_leads}
+                onChange={(e) =>
+                  setBoth((prev) => ({ ...prev, max_leads: Number(e.target.value) || 1 }))
+                }
+              />
+            </div>
             <Input
-              id="max_leads"
-              label="Nombre max de leads"
-              type="number"
-              placeholder="100"
-              error={errors.max_leads?.message}
-              {...register("max_leads", { valueAsNumber: true })}
+              id="both-keywords"
+              label="Mots-cles (optionnel)"
+              placeholder="services, nettoyage, assistance"
+              value={both.keywords}
+              onChange={(e) => setBoth((prev) => ({ ...prev, keywords: e.target.value }))}
             />
-          </div>
-
-          <Button
-            type="submit"
-            size="lg"
-            className="w-full gap-2"
-            isLoading={createExtraction.isPending}
-          >
-            <Search className="h-5 w-5" />
-            Lancer l&apos;extraction
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+            <Button type="submit" className="w-full gap-2" isLoading={createExtraction.isPending}>
+              <Search className="h-4 w-4" />
+              Lancer Extraction Mixte
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

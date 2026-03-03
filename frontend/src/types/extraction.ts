@@ -29,9 +29,14 @@ export interface ExtractionJob {
 
 export interface ExtractionCreate {
   source?: string;
-  keywords: string[];
+  target_kind?: "b2b" | "b2c" | "both";
+  keywords?: string[];
+  company_name?: string;
+  first_name?: string;
+  last_name?: string;
   city?: string;
   postal_code?: string;
+  department?: string;
   radius_km?: number;
   sector_filter?: string;
   max_leads?: number;
