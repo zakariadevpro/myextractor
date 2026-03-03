@@ -69,12 +69,13 @@ class MetaLeadAdsService:
         email = _first_value(fields, ["email", "email_address", "courriel"])
         phone = _first_value(fields, ["phone_number", "phone", "mobile_phone"])
         city = _first_value(fields, ["city", "ville"])
-        consent_text_version = _first_value(
-            fields, ["consent_text_version", "consent_version", "legal_text_version"]
-        ) or "meta-default"
-        privacy_policy_version = _first_value(
-            fields, ["privacy_policy_version", "privacy_version"]
-        ) or "meta-default"
+        consent_text_version = (
+            _first_value(fields, ["consent_text_version", "consent_version", "legal_text_version"])
+            or "meta-default"
+        )
+        privacy_policy_version = (
+            _first_value(fields, ["privacy_policy_version", "privacy_version"]) or "meta-default"
+        )
         purpose = _first_value(fields, ["purpose", "finalite"]) or "prospection_commerciale"
         doi_raw = _first_value(fields, ["double_opt_in", "doubleoptin", "doi"])
         double_opt_in = str(doi_raw or "").lower() in {"1", "true", "yes", "oui"}
@@ -97,4 +98,3 @@ class MetaLeadAdsService:
             double_opt_in=double_opt_in,
             double_opt_in_at=double_opt_in_at,
         )
-

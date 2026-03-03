@@ -1,13 +1,16 @@
 import re
 
-EMAIL_REGEX = re.compile(
-    r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-)
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
 # Common disposable email domains to flag
 DISPOSABLE_DOMAINS = {
-    "guerrillamail.com", "mailinator.com", "tempmail.com", "throwaway.email",
-    "yopmail.com", "sharklasers.com", "guerrillamailblock.com",
+    "guerrillamail.com",
+    "mailinator.com",
+    "tempmail.com",
+    "throwaway.email",
+    "yopmail.com",
+    "sharklasers.com",
+    "guerrillamailblock.com",
 }
 
 

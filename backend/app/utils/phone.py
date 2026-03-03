@@ -35,9 +35,7 @@ def detect_phone_type(raw_phone: str, country_code: str = "FR") -> str:
             return "landline"
         elif number_type == PhoneNumberType.FIXED_LINE_OR_MOBILE:
             # French numbers starting with 06/07 are mobile
-            national = phonenumbers.format_number(
-                parsed, phonenumbers.PhoneNumberFormat.NATIONAL
-            )
+            national = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.NATIONAL)
             if national.startswith("06") or national.startswith("07"):
                 return "mobile"
             return "landline"

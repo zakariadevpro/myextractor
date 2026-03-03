@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 @dataclass
 class ScrapedLead:
     """Standard lead data structure returned by all scrapers."""
+
     company_name: str
     address: str = ""
     postal_code: str = ""

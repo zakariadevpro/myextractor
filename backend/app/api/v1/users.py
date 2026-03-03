@@ -99,9 +99,7 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(User).where(
-            User.id == user_id, User.organization_id == current_user.organization_id
-        )
+        select(User).where(User.id == user_id, User.organization_id == current_user.organization_id)
     )
     user = result.scalar_one_or_none()
     if not user:
@@ -149,9 +147,7 @@ async def deactivate_user(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(User).where(
-            User.id == user_id, User.organization_id == current_user.organization_id
-        )
+        select(User).where(User.id == user_id, User.organization_id == current_user.organization_id)
     )
     user = result.scalar_one_or_none()
     if not user:

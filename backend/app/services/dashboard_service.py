@@ -63,9 +63,7 @@ class DashboardService:
         email_rate = (email_valid / email_total * 100) if email_total > 0 else 0.0
 
         # Duplicate rate
-        dup_q = select(func.count()).where(
-            Lead.organization_id == org_id, Lead.is_duplicate
-        )
+        dup_q = select(func.count()).where(Lead.organization_id == org_id, Lead.is_duplicate)
         dup_count = (await self.db.execute(dup_q)).scalar() or 0
         dup_rate = (dup_count / total * 100) if total > 0 else 0.0
 
@@ -205,8 +203,7 @@ class DashboardService:
             double_opt_in_rate=round(doi_rate, 1),
             revocation_rate=round(revocation_rate, 1),
             by_source=[
-                B2CConsentSourceStat(source=row.source, count=row.count)
-                for row in by_source_rows
+                B2CConsentSourceStat(source=row.source, count=row.count) for row in by_source_rows
             ],
         )
 

@@ -25,4 +25,3 @@ def test_meta_mapper_builds_intake_payload_from_field_data():
     assert payload.consent_proof_ref == "meta:123456"
     assert payload.double_opt_in is True
     assert payload.source_campaign == "meta_campaign_test"
-

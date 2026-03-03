@@ -41,4 +41,3 @@ def test_extraction_source_validation_rejects_b2c_source():
             radius_km=10,
             max_leads=50,
         )
-

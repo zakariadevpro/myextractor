@@ -91,9 +91,7 @@ class AuditLogService:
             ExtractionJob.created_at >= since,
         )
         total_jobs = (
-            await self.db.execute(
-                select(func.count()).where(*extraction_where)
-            )
+            await self.db.execute(select(func.count()).where(*extraction_where))
         ).scalar() or 0
         completed_jobs = (
             await self.db.execute(

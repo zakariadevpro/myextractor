@@ -69,4 +69,3 @@ class LeadConsent(Base):
     )
 
     lead = relationship("Lead", back_populates="consent")
-

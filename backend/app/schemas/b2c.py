@@ -37,4 +37,3 @@ class B2CLeadIntakeCreate(BaseModel):
         if self.double_opt_in and self.double_opt_in_at is None:
             self.double_opt_in_at = self.consent_at
         return self
-

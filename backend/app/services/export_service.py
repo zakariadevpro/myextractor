@@ -45,10 +45,21 @@ class ExportService:
 
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow([
-            "Entreprise", "Secteur", "Email", "Téléphone", "Ville",
-            "Code Postal", "Département", "Score", "Source", "Site Web", "SIREN",
-        ])
+        writer.writerow(
+            [
+                "Entreprise",
+                "Secteur",
+                "Email",
+                "Téléphone",
+                "Ville",
+                "Code Postal",
+                "Département",
+                "Score",
+                "Source",
+                "Site Web",
+                "SIREN",
+            ]
+        )
 
         for lead in leads:
             primary_email = ""
@@ -67,18 +78,20 @@ class ExportService:
             if not primary_phone and lead.phones:
                 primary_phone = lead.phones[0].phone_normalized or lead.phones[0].phone_raw or ""
 
-            writer.writerow([
-                self._sanitize_csv_cell(lead.company_name),
-                self._sanitize_csv_cell(lead.sector),
-                self._sanitize_csv_cell(primary_email),
-                self._sanitize_csv_cell(primary_phone),
-                self._sanitize_csv_cell(lead.city),
-                self._sanitize_csv_cell(lead.postal_code),
-                self._sanitize_csv_cell(lead.department),
-                lead.quality_score,
-                self._sanitize_csv_cell(lead.source),
-                self._sanitize_csv_cell(lead.website),
-                self._sanitize_csv_cell(lead.siren),
-            ])
+            writer.writerow(
+                [
+                    self._sanitize_csv_cell(lead.company_name),
+                    self._sanitize_csv_cell(lead.sector),
+                    self._sanitize_csv_cell(primary_email),
+                    self._sanitize_csv_cell(primary_phone),
+                    self._sanitize_csv_cell(lead.city),
+                    self._sanitize_csv_cell(lead.postal_code),
+                    self._sanitize_csv_cell(lead.department),
+                    lead.quality_score,
+                    self._sanitize_csv_cell(lead.source),
+                    self._sanitize_csv_cell(lead.website),
+                    self._sanitize_csv_cell(lead.siren),
+                ]
+            )
 
         return output.getvalue()

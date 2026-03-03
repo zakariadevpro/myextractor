@@ -34,9 +34,7 @@ class AuthService:
         # Create organization
         slug = slugify(data.organization_name)
         # Ensure unique slug
-        existing_org = await self.db.execute(
-            select(Organization).where(Organization.slug == slug)
-        )
+        existing_org = await self.db.execute(select(Organization).where(Organization.slug == slug))
         if existing_org.scalar_one_or_none():
             slug = f"{slug}-{uuid.uuid4().hex[:6]}"
 

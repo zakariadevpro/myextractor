@@ -58,4 +58,3 @@ class LeadConsentUpdate(BaseModel):
         if self.double_opt_in is False and self.double_opt_in_at is not None:
             raise ValueError("double_opt_in_at must be null when double_opt_in is false")
         return self
-

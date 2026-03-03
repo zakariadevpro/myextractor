@@ -297,10 +297,20 @@ async def export_leads_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "Entreprise", "Secteur", "Email", "Téléphone", "Ville",
-        "Code Postal", "Score", "Source", "Site Web", "SIREN"
-    ])
+    writer.writerow(
+        [
+            "Entreprise",
+            "Secteur",
+            "Email",
+            "Téléphone",
+            "Ville",
+            "Code Postal",
+            "Score",
+            "Source",
+            "Site Web",
+            "SIREN",
+        ]
+    )
     for lead in leads:
         primary_email = next((e.email for e in lead.emails if e.is_primary), "")
         if not primary_email and lead.emails:
@@ -312,18 +322,20 @@ async def export_leads_csv(
         if not primary_phone and lead.phones:
             primary_phone = lead.phones[0].phone_normalized or lead.phones[0].phone_raw or ""
 
-        writer.writerow([
-            _sanitize_csv_cell(lead.company_name),
-            _sanitize_csv_cell(lead.sector),
-            _sanitize_csv_cell(primary_email),
-            _sanitize_csv_cell(primary_phone),
-            _sanitize_csv_cell(lead.city),
-            _sanitize_csv_cell(lead.postal_code),
-            lead.quality_score,
-            _sanitize_csv_cell(lead.source),
-            _sanitize_csv_cell(lead.website),
-            _sanitize_csv_cell(lead.siren),
-        ])
+        writer.writerow(
+            [
+                _sanitize_csv_cell(lead.company_name),
+                _sanitize_csv_cell(lead.sector),
+                _sanitize_csv_cell(primary_email),
+                _sanitize_csv_cell(primary_phone),
+                _sanitize_csv_cell(lead.city),
+                _sanitize_csv_cell(lead.postal_code),
+                lead.quality_score,
+                _sanitize_csv_cell(lead.source),
+                _sanitize_csv_cell(lead.website),
+                _sanitize_csv_cell(lead.siren),
+            ]
+        )
 
     output.seek(0)
     return StreamingResponse(
@@ -663,9 +675,7 @@ async def delete_lead(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Lead).where(
-            Lead.id == lead_id, Lead.organization_id == current_user.organization_id
-        )
+        select(Lead).where(Lead.id == lead_id, Lead.organization_id == current_user.organization_id)
     )
     lead = result.scalar_one_or_none()
     if not lead:

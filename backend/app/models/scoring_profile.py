@@ -32,6 +32,4 @@ class ScoringProfile(Base):
     organization = relationship("Organization")
     updater = relationship("User")
 
-    __table_args__ = (
-        Index("uq_scoring_profiles_org", "organization_id", unique=True),
-    )
+    __table_args__ = (Index("uq_scoring_profiles_org", "organization_id", unique=True),)

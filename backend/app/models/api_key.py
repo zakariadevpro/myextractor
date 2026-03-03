@@ -33,6 +33,4 @@ class ApiKey(Base):
     organization = relationship("Organization")
     creator = relationship("User")
 
-    __table_args__ = (
-        Index("idx_api_keys_org_active", "organization_id", "is_active"),
-    )
+    __table_args__ = (Index("idx_api_keys_org_active", "organization_id", "is_active"),)

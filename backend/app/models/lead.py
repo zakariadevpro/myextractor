@@ -56,9 +56,7 @@ class Lead(Base):
     is_duplicate: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -104,9 +102,7 @@ class LeadEmail(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
     is_valid: Mapped[bool | None] = mapped_column(Boolean)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     lead = relationship("Lead", back_populates="emails")
 
@@ -123,8 +119,6 @@ class LeadPhone(Base):
     phone_type: Mapped[str] = mapped_column(String(20), default="unknown")
     is_valid: Mapped[bool | None] = mapped_column(Boolean)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     lead = relationship("Lead", back_populates="phones")

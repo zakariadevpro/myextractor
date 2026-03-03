@@ -39,7 +39,12 @@ async def run_with_retries(
     max_delay_seconds: float = 8.0,
 ) -> T:
     attempts = max(1, retries if retries is not None else settings.max_retries)
-    base_delay = max(0.2, base_delay_seconds if base_delay_seconds is not None else settings.request_delay_seconds)
+    base_delay = max(
+        0.2,
+        base_delay_seconds
+        if base_delay_seconds is not None
+        else settings.request_delay_seconds,
+    )
     last_exc: Exception | None = None
 
     for attempt in range(1, attempts + 1):

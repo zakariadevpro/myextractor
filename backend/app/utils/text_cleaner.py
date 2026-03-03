@@ -22,8 +22,15 @@ def clean_company_name(name: str) -> str:
     name = clean_text(name)
     # Remove common suffixes
     suffixes = [
-        r"\bSAS\b", r"\bSARL\b", r"\bSA\b", r"\bEURL\b", r"\bSCI\b",
-        r"\bSNC\b", r"\bSCSP\b", r"\bSEL\b", r"\bSELARL\b",
+        r"\bSAS\b",
+        r"\bSARL\b",
+        r"\bSA\b",
+        r"\bEURL\b",
+        r"\bSCI\b",
+        r"\bSNC\b",
+        r"\bSCSP\b",
+        r"\bSEL\b",
+        r"\bSELARL\b",
     ]
     for suffix in suffixes:
         name = re.sub(suffix, "", name, flags=re.IGNORECASE)

@@ -26,14 +26,13 @@ class ExtractionService:
 
         for keyword in data.keywords or []:
             add(keyword)
+        if (data.first_name or "").strip() and (data.last_name or "").strip():
+            add(f"{data.first_name.strip()} {data.last_name.strip()}")
         add(data.company_name)
         add(data.first_name)
         add(data.last_name)
+        add(data.postal_code)
         add(data.department)
-        if data.target_kind == "b2c":
-            add("particulier")
-        if data.target_kind == "b2b":
-            add("entreprise")
         return tokens
 
     async def create_job(self, data: ExtractionCreate, user: User) -> ExtractionJob:

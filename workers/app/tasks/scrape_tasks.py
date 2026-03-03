@@ -149,7 +149,9 @@ def _run_async(coro):
 def _normalize_text(value: str | None) -> str:
     if not value:
         return ""
-    normalized = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    normalized = (
+        unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    )
     return re.sub(r"\s+", " ", normalized).strip().lower()
 
 
@@ -253,13 +255,19 @@ def _has_email_website_domain_match(lead: ScrapedLead) -> bool:
             continue
         if email_domain == site_domain:
             return True
-        if site_domain.endswith(f".{email_domain}") or email_domain.endswith(f".{site_domain}"):
+        if site_domain.endswith(f".{email_domain}") or email_domain.endswith(
+            f".{site_domain}"
+        ):
             return True
     return False
 
 
 def _professional_email_count(lead: ScrapedLead) -> int:
-    return sum(1 for email in (lead.emails or []) if _email_domain(email) not in PERSONAL_EMAIL_DOMAINS)
+    return sum(
+        1
+        for email in (lead.emails or [])
+        if _email_domain(email) not in PERSONAL_EMAIL_DOMAINS
+    )
 
 
 def _normalize_phone_for_storage(phone: str) -> str | None:
@@ -303,17 +311,21 @@ def _clamp_score(value: int) -> int:
 
 def _load_scoring_weights(db, organization_id: str) -> dict[str, int]:
     weights = dict(DEFAULT_SCORING_WEIGHTS)
-    row = db.execute(
-        text(
-            """
+    row = (
+        db.execute(
+            text(
+                """
             SELECT weights
             FROM scoring_profiles
             WHERE organization_id = :org_id
             LIMIT 1
             """
-        ),
-        {"org_id": organization_id},
-    ).mappings().first()
+            ),
+            {"org_id": organization_id},
+        )
+        .mappings()
+        .first()
+    )
     if not row:
         return weights
 
@@ -344,7 +356,9 @@ def _compute_initial_quality(
         if len(lead.emails) > 1:
             score += scoring_weights.get("extra_email", 4)
         if _has_professional_email(lead):
-            score += scoring_weights.get("pro_email_bonus", settings.contact_pro_email_bonus)
+            score += scoring_weights.get(
+                "pro_email_bonus", settings.contact_pro_email_bonus
+            )
         if _has_email_website_domain_match(lead):
             score += scoring_weights.get(
                 "email_website_domain_match_bonus",
@@ -355,11 +369,15 @@ def _compute_initial_quality(
         if any(_detect_phone_type(phone) == "mobile" for phone in lead.phones):
             score += scoring_weights.get("mobile_phone", 5)
         if len(lead.phones) > 1:
-            score += scoring_weights.get("multi_phone_bonus", settings.contact_multi_phone_bonus)
+            score += scoring_weights.get(
+                "multi_phone_bonus", settings.contact_multi_phone_bonus
+            )
     if lead.website:
         score += scoring_weights.get("website", 10)
     if lead.website and lead.phones and _has_professional_email(lead):
-        score += scoring_weights.get("full_contact_profile_bonus", settings.contact_full_profile_bonus)
+        score += scoring_weights.get(
+            "full_contact_profile_bonus", settings.contact_full_profile_bonus
+        )
     if lead.address and lead.postal_code and lead.city:
         score += scoring_weights.get("address_3_fields", 10)
     if lead.siren:
@@ -386,7 +404,9 @@ def _sanitize_scraped_lead(lead: ScrapedLead) -> ScrapedLead | None:
     lead.address = re.sub(r"\s+", " ", (lead.address or "")).strip()
     lead.sector = re.sub(r"\s+", " ", (lead.sector or "")).strip()
     lead.website = _canonical_website(lead.website) or ""
-    lead.source_url = _canonical_website(lead.source_url) or (lead.source_url or "").strip()
+    lead.source_url = (
+        _canonical_website(lead.source_url) or (lead.source_url or "").strip()
+    )
     lead.siren = re.sub(r"\D", "", (lead.siren or ""))[:9]
     lead.postal_code = re.sub(r"\D", "", (lead.postal_code or ""))[:5]
     lead.emails = _clean_email_list(lead.emails or [])
@@ -422,6 +442,12 @@ def _has_business_name_hints(company_name: str) -> bool:
     return False
 
 
+def _has_strong_b2b_identity(lead: ScrapedLead) -> bool:
+    return bool(
+        lead.siren or lead.naf_code or _has_business_name_hints(lead.company_name)
+    )
+
+
 def _is_b2b_candidate(lead: ScrapedLead) -> bool:
     # Strong business signals first.
     if lead.siren or lead.naf_code:
@@ -441,6 +467,32 @@ def _is_b2b_candidate(lead: ScrapedLead) -> bool:
 
     # Strict B2B mode: unknown entities are rejected by default.
     return False
+
+
+def _query_has_person_intent(keywords: list[str] | None) -> bool:
+    if not keywords:
+        return False
+    tokens: list[str] = []
+    for value in keywords:
+        normalized = _normalize_text(value)
+        if not normalized:
+            continue
+        tokens.extend(tok for tok in re.split(r"[^a-z0-9]+", normalized) if tok)
+    if not tokens:
+        return False
+
+    token_set = set(tokens)
+    if token_set.intersection(CIVILITY_TOKENS):
+        return True
+    if token_set.intersection(COMMON_FIRST_NAMES):
+        return True
+    if token_set.intersection(B2B_HINT_TOKENS) or token_set.intersection(
+        COMPANY_LEGAL_SUFFIXES
+    ):
+        return False
+
+    alpha_tokens = [tok for tok in tokens if tok.isalpha()]
+    return 1 <= len(alpha_tokens) <= 3
 
 
 def _normalize_target_kind(target_kind: str | None) -> str:
@@ -470,6 +522,7 @@ def _classify_lead_kind(lead: ScrapedLead) -> str:
 def _filter_by_target_kind(
     leads: list[ScrapedLead],
     target_kind: str,
+    query_keywords: list[str] | None = None,
 ) -> tuple[list[tuple[ScrapedLead, str]], dict[str, int]]:
     selected: list[tuple[ScrapedLead, str]] = []
     counts = {
@@ -481,6 +534,9 @@ def _filter_by_target_kind(
     }
     normalized_target = _normalize_target_kind(target_kind)
     strict_unknown = bool(settings.b2b_strict_mode)
+    person_query = normalized_target == "b2c" and _query_has_person_intent(
+        query_keywords
+    )
 
     for lead in leads:
         classified = _classify_lead_kind(lead)
@@ -509,6 +565,16 @@ def _filter_by_target_kind(
         elif normalized_target == "b2c":
             if classified == "b2c":
                 keep = True
+            elif classified == "unknown":
+                keep = True
+                stored_kind = "b2c"
+            elif (
+                person_query
+                and classified == "b2b"
+                and not _has_strong_b2b_identity(lead)
+            ):
+                keep = True
+                stored_kind = "b2c"
 
         if keep:
             selected.append((lead, stored_kind))
@@ -556,7 +622,9 @@ def _merge_leads(base: ScrapedLead, incoming: ScrapedLead) -> ScrapedLead:
     return base
 
 
-def _dedupe_and_merge_scraped_leads(leads: list[ScrapedLead], max_results: int) -> list[ScrapedLead]:
+def _dedupe_and_merge_scraped_leads(
+    leads: list[ScrapedLead], max_results: int
+) -> list[ScrapedLead]:
     merged: dict[str, ScrapedLead] = {}
     ordered_keys: list[str] = []
     for lead in leads:
@@ -616,6 +684,7 @@ async def _run_whiteextractor_search(
     city: str | None,
     radius_km: int | None,
     max_results: int,
+    target_kind: str = "both",
 ) -> list[ScrapedLead]:
     """
     WhiteExtractor mode:
@@ -624,7 +693,11 @@ async def _run_whiteextractor_search(
     3) Fresh local business signals (Google Maps)
     """
     all_leads: list[ScrapedLead] = []
-    source_order = ["sirene_api", "pages_jaunes", "google_maps"]
+    normalized_target = _normalize_target_kind(target_kind)
+    if normalized_target == "b2c":
+        source_order = ["pages_jaunes", "google_maps"]
+    else:
+        source_order = ["sirene_api", "pages_jaunes", "google_maps"]
     for source_name in source_order:
         try:
             leads = await _run_single_source_search(
@@ -634,7 +707,9 @@ async def _run_whiteextractor_search(
                 radius_km=radius_km,
                 max_results=max_results,
             )
-            logger.info(f"WhiteExtractor source={source_name} returned {len(leads)} leads")
+            logger.info(
+                f"WhiteExtractor source={source_name} returned {len(leads)} leads"
+            )
             all_leads.extend(leads)
         except Exception as exc:
             logger.warning(f"WhiteExtractor source={source_name} failed: {exc}")
@@ -651,15 +726,22 @@ def _match_workflow_conditions(lead_row: dict, conditions: dict) -> bool:
         return True
 
     min_score = conditions.get("min_score")
-    if min_score is not None and _safe_int(lead_row.get("quality_score"), 0) < _safe_int(min_score, 0):
+    if min_score is not None and _safe_int(
+        lead_row.get("quality_score"), 0
+    ) < _safe_int(min_score, 0):
         return False
 
     max_score = conditions.get("max_score")
-    if max_score is not None and _safe_int(lead_row.get("quality_score"), 0) > _safe_int(max_score, 100):
+    if max_score is not None and _safe_int(
+        lead_row.get("quality_score"), 0
+    ) > _safe_int(max_score, 100):
         return False
 
     lead_kind = conditions.get("lead_kind")
-    if lead_kind and str(lead_row.get("lead_kind", "")).lower() != str(lead_kind).lower():
+    if (
+        lead_kind
+        and str(lead_row.get("lead_kind", "")).lower() != str(lead_kind).lower()
+    ):
         return False
 
     source_in = conditions.get("source_in")
@@ -718,9 +800,10 @@ def _apply_workflow_actions(lead_row: dict, actions: dict) -> dict:
 
 
 def _run_post_extraction_workflows(db, organization_id: str, job_id: str) -> dict:
-    workflow_rows = db.execute(
-        text(
-            """
+    workflow_rows = (
+        db.execute(
+            text(
+                """
             SELECT id, conditions, actions
             FROM automation_workflows
             WHERE organization_id = :org_id
@@ -728,15 +811,19 @@ def _run_post_extraction_workflows(db, organization_id: str, job_id: str) -> dic
               AND trigger_event = 'post_extraction'
             ORDER BY created_at ASC
             """
-        ),
-        {"org_id": organization_id},
-    ).mappings().all()
+            ),
+            {"org_id": organization_id},
+        )
+        .mappings()
+        .all()
+    )
     if not workflow_rows:
         return {"workflows": 0, "matched": 0, "updated": 0}
 
-    lead_rows = db.execute(
-        text(
-            """
+    lead_rows = (
+        db.execute(
+            text(
+                """
             SELECT
               l.id,
               l.quality_score,
@@ -758,9 +845,12 @@ def _run_post_extraction_workflows(db, organization_id: str, job_id: str) -> dic
             WHERE l.organization_id = :org_id
               AND l.extraction_job_id = CAST(:job_id AS uuid)
             """
-        ),
-        {"org_id": organization_id, "job_id": job_id},
-    ).mappings().all()
+            ),
+            {"org_id": organization_id, "job_id": job_id},
+        )
+        .mappings()
+        .all()
+    )
 
     total_matched = 0
     total_updated = 0
@@ -858,7 +948,9 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
 
         # Update status to running
         db.execute(
-            text("UPDATE extraction_jobs SET status = 'running', started_at = :now WHERE id = :id"),
+            text(
+                "UPDATE extraction_jobs SET status = 'running', started_at = :now WHERE id = :id"
+            ),
             {"id": job_id, "now": datetime.now(timezone.utc)},
         )
         db.commit()
@@ -879,6 +971,7 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                     city=city,
                     radius_km=radius_km,
                     max_results=max_leads,
+                    target_kind=target_kind,
                 )
             )
         else:
@@ -897,7 +990,11 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
             )
 
         raw_scraped_count = len(scraped_leads)
-        selected_leads, filter_counts = _filter_by_target_kind(scraped_leads, target_kind)
+        selected_leads, filter_counts = _filter_by_target_kind(
+            scraped_leads,
+            target_kind,
+            query_keywords=keywords,
+        )
         if len(selected_leads) > max_leads:
             selected_leads = selected_leads[:max_leads]
         leads_with_phone = sum(1 for lead, _ in selected_leads if lead.phones)
@@ -1134,17 +1231,25 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
         )
         db.commit()
 
-        logger.info(f"Job {job_id} completed: {leads_new} new, {leads_duplicate} duplicates")
+        logger.info(
+            f"Job {job_id} completed: {leads_new} new, {leads_duplicate} duplicates"
+        )
 
     except Exception as e:
         logger.error(f"Job {job_id} failed: {e}")
         db.rollback()
         try:
             duration_seconds = int(max(0, time.monotonic() - job_started_monotonic))
-            job_for_audit = db.execute(
-                text("SELECT organization_id, created_by, source FROM extraction_jobs WHERE id = :id"),
-                {"id": job_id},
-            ).mappings().first()
+            job_for_audit = (
+                db.execute(
+                    text(
+                        "SELECT organization_id, created_by, source FROM extraction_jobs WHERE id = :id"
+                    ),
+                    {"id": job_id},
+                )
+                .mappings()
+                .first()
+            )
             if job_for_audit:
                 try:
                     db.execute(
@@ -1184,7 +1289,11 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                     SET status = 'failed', error_message = :error, completed_at = :now
                     WHERE id = :id
                 """),
-                {"id": job_id, "error": str(e)[:500], "now": datetime.now(timezone.utc)},
+                {
+                    "id": job_id,
+                    "error": str(e)[:500],
+                    "now": datetime.now(timezone.utc),
+                },
             )
             db.commit()
         except Exception:

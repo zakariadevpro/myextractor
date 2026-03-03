@@ -70,4 +70,3 @@ class RateLimitService:
             limit=settings.auth_refresh_rate_limit,
             window_seconds=settings.auth_refresh_window_seconds,
         )
-
