@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from app.api.v1.audit import router as audit_router
 from app.api.v1.api_keys import router as api_keys_router
+from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.extractions import router as extractions_router

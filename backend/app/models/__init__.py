@@ -1,5 +1,5 @@
-from app.models.audit_log import AuditLog
 from app.models.api_key import ApiKey
+from app.models.audit_log import AuditLog
 from app.models.automation_workflow import AutomationWorkflow
 from app.models.extraction import ExtractionJob
 from app.models.lead import Lead, LeadEmail, LeadPhone

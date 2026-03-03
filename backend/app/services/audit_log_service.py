@@ -173,7 +173,10 @@ class AuditLogService:
             await self.db.execute(
                 text(
                     """
-                    SELECT COALESCE(SUM(COALESCE(NULLIF(details->>'classified_b2b', '')::int, 0)), 0)
+                    SELECT COALESCE(
+                      SUM(COALESCE(NULLIF(details->>'classified_b2b', '')::int, 0)),
+                      0
+                    )
                     FROM audit_logs
                     WHERE organization_id = :org_id
                       AND action = 'extraction.analytics'
@@ -187,7 +190,10 @@ class AuditLogService:
             await self.db.execute(
                 text(
                     """
-                    SELECT COALESCE(SUM(COALESCE(NULLIF(details->>'classified_b2c', '')::int, 0)), 0)
+                    SELECT COALESCE(
+                      SUM(COALESCE(NULLIF(details->>'classified_b2c', '')::int, 0)),
+                      0
+                    )
                     FROM audit_logs
                     WHERE organization_id = :org_id
                       AND action = 'extraction.analytics'

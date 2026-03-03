@@ -47,7 +47,9 @@ class ExtractionCreate(BaseModel):
         if self.target_kind == "b2c" and not (has_person or has_keywords):
             raise ValueError("B2C requires first_name/last_name or keywords.")
         if self.target_kind == "both" and not (has_company or has_person or has_keywords):
-            raise ValueError("Provide at least one of company_name, first_name, last_name or keywords.")
+            raise ValueError(
+                "Provide at least one of company_name, first_name, last_name or keywords."
+            )
         return self
 
 

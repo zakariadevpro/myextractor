@@ -19,7 +19,12 @@ class LeadService:
         )
         return result.scalar_one_or_none()
 
-    async def check_duplicate(self, company_name: str, city: str | None, org_id: uuid.UUID) -> Lead | None:
+    async def check_duplicate(
+        self,
+        company_name: str,
+        city: str | None,
+        org_id: uuid.UUID,
+    ) -> Lead | None:
         """Check if a lead with same name and city already exists."""
         query = select(Lead).where(
             Lead.organization_id == org_id,
