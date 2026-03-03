@@ -4,16 +4,23 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_admin, get_current_manager
+from app.api.deps import get_current_admin, get_current_manager, get_current_super_admin
 from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.core.permission_catalog import normalize_permission_name
 from app.core.roles import ROLE_SUPER_ADMIN
 from app.core.security import hash_password
 from app.db.session import get_db
 from app.models.subscription import Plan, Subscription
 from app.models.user import User
 from app.schemas.common import MessageResponse, PaginatedResponse
+from app.schemas.permission import (
+    PermissionCatalogItem,
+    UserPermissionsResponse,
+    UserPermissionsUpdate,
+)
 from app.schemas.user import UserCreate, UserCreateResponse, UserResponse, UserUpdate
 from app.services.audit_log_service import AuditLogService
+from app.services.permission_service import PermissionService
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -52,6 +59,9 @@ async def list_users(
     current_user: User = Depends(get_current_manager),
     db: AsyncSession = Depends(get_db),
 ):
+    permission_service = PermissionService(db)
+    await permission_service.require_user_permission(current_user, "users.view")
+
     offset = (page - 1) * page_size
     base_query = select(User).where(User.organization_id == current_user.organization_id)
 
@@ -72,12 +82,91 @@ async def list_users(
     )
 
 
+@router.get("/permissions/catalog", response_model=list[PermissionCatalogItem])
+async def get_permission_catalog(
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    permission_service = PermissionService(db)
+    await permission_service.require_user_permission(current_user, "users.view")
+    return permission_service.get_permission_catalog()
+
+
+@router.get("/{user_id}/permissions", response_model=UserPermissionsResponse)
+async def get_user_permissions(
+    user_id: uuid.UUID,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    permission_service = PermissionService(db)
+    await permission_service.require_user_permission(current_user, "users.view")
+
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.organization_id == current_user.organization_id)
+    )
+    target_user = result.scalar_one_or_none()
+    if not target_user:
+        raise NotFoundError("User not found")
+
+    return await permission_service.get_user_permissions_snapshot(target_user)
+
+
+@router.put("/{user_id}/permissions", response_model=UserPermissionsResponse)
+async def update_user_permissions(
+    user_id: uuid.UUID,
+    data: UserPermissionsUpdate,
+    current_user: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    permission_service = PermissionService(db)
+    await permission_service.require_user_permission(current_user, "users.permissions.manage")
+
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.organization_id == current_user.organization_id)
+    )
+    target_user = result.scalar_one_or_none()
+    if not target_user:
+        raise NotFoundError("User not found")
+    if target_user.id == current_user.id:
+        raise BadRequestError("Cannot change your own permissions")
+
+    grants = [normalize_permission_name(item) for item in data.grants]
+    revokes = [normalize_permission_name(item) for item in data.revokes]
+
+    if target_user.role == ROLE_SUPER_ADMIN and "access.super_admin" in revokes:
+        active_super_admins = await permission_service.count_active_super_admins(
+            current_user.organization_id
+        )
+        if active_super_admins <= 1:
+            raise BadRequestError(
+                "Cannot remove access.super_admin from the last active super admin"
+            )
+
+    snapshot = await permission_service.replace_user_permissions(
+        target_user=target_user,
+        grants=grants,
+        revokes=revokes,
+    )
+    await AuditLogService(db).log(
+        action="user.permissions_update",
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        resource_type="user",
+        resource_id=str(target_user.id),
+        details={"grants": snapshot.grants, "revokes": snapshot.revokes},
+    )
+    return snapshot
+
+
 @router.post("", response_model=UserCreateResponse)
 async def create_user(
     data: UserCreate,
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    permission_service = PermissionService(db)
+    await permission_service.require_user_permission(current_user, "users.manage")
+
     email = data.email.strip().lower()
     first_name = data.first_name.strip()
     last_name = data.last_name.strip()
@@ -139,6 +228,9 @@ async def update_user(
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    permission_service = PermissionService(db)
+    await permission_service.require_user_permission(current_user, "users.manage")
+
     result = await db.execute(
         select(User).where(User.id == user_id, User.organization_id == current_user.organization_id)
     )
@@ -192,6 +284,9 @@ async def deactivate_user(
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    permission_service = PermissionService(db)
+    await permission_service.require_user_permission(current_user, "users.manage")
+
     result = await db.execute(
         select(User).where(User.id == user_id, User.organization_id == current_user.organization_id)
     )

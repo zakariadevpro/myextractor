@@ -3,7 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import apiClient from "@/lib/api-client";
 import type { PaginatedResponse } from "@/types/api";
-import type { User, UserRole } from "@/types/user";
+import type {
+  PermissionCatalogItem,
+  User,
+  UserPermissionsSnapshot,
+  UserRole,
+} from "@/types/user";
 
 interface UsersFilters {
   page?: number;
@@ -78,6 +83,54 @@ export function useDeactivateUser() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+}
+
+export function usePermissionCatalog(enabled = true) {
+  return useQuery({
+    queryKey: ["users", "permissions", "catalog"],
+    queryFn: async () => {
+      const response = await apiClient.get<PermissionCatalogItem[]>("/users/permissions/catalog");
+      return response.data;
+    },
+    enabled,
+    placeholderData: [],
+  });
+}
+
+export function useUserPermissions(userId?: string) {
+  return useQuery({
+    queryKey: ["users", "permissions", userId],
+    queryFn: async () => {
+      const response = await apiClient.get<UserPermissionsSnapshot>(`/users/${userId}/permissions`);
+      return response.data;
+    },
+    enabled: Boolean(userId),
+  });
+}
+
+export function useUpdateUserPermissions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      userId,
+      grants,
+      revokes,
+    }: {
+      userId: string;
+      grants: string[];
+      revokes: string[];
+    }) => {
+      const response = await apiClient.put<UserPermissionsSnapshot>(`/users/${userId}/permissions`, {
+        grants,
+        revokes,
+      });
+      return response.data;
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["users", "permissions", variables.userId] });
     },
   });
 }

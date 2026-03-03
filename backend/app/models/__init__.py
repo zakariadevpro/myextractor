@@ -8,6 +8,7 @@ from app.models.organization import Organization
 from app.models.scoring_profile import ScoringProfile
 from app.models.subscription import Plan, Subscription, UsageRecord
 from app.models.user import User
+from app.models.user_permission import UserPermission
 
 __all__ = [
     "AuditLog",
@@ -15,6 +16,7 @@ __all__ = [
     "AutomationWorkflow",
     "Organization",
     "User",
+    "UserPermission",
     "Plan",
     "Subscription",
     "UsageRecord",

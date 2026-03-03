@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
   Copy,
   KeyRound,
   Mail,
+  SlidersHorizontal,
   ShieldAlert,
   Shield,
   Trash2,
@@ -29,9 +30,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
-import { useCreateUser, useDeactivateUser, useUpdateUser, useUsers } from "@/hooks/use-users";
+import {
+  useCreateUser,
+  useDeactivateUser,
+  usePermissionCatalog,
+  useUpdateUser,
+  useUpdateUserPermissions,
+  useUserPermissions,
+  useUsers,
+} from "@/hooks/use-users";
 import { useCurrentSubscription } from "@/hooks/use-subscriptions";
-import { hasMinimumRole } from "@/lib/authz";
+import { hasPermission } from "@/lib/authz";
 import { getInitials } from "@/lib/utils";
 import type { User, UserRole } from "@/types/user";
 
@@ -57,7 +66,11 @@ const roleOptions = [
 
 export default function TeamPage() {
   const { user } = useAuth();
-  const canManageTeam = hasMinimumRole(user?.role, "admin");
+  const canManageTeam = hasPermission(user?.effective_permissions, "users.manage");
+  const canManagePermissions = hasPermission(
+    user?.effective_permissions,
+    "users.permissions.manage"
+  );
   const [page, setPage] = useState(1);
 
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
@@ -70,11 +83,19 @@ export default function TeamPage() {
     temporary_password: string;
   } | null>(null);
   const [passwordCopied, setPasswordCopied] = useState(false);
+  const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
+  const [permissionsTarget, setPermissionsTarget] = useState<User | null>(null);
+  const [editedPermissions, setEditedPermissions] = useState<string[]>([]);
 
   const { data, isLoading } = useUsers({ page, page_size: 20 });
   const { data: currentSubscription } = useCurrentSubscription(canManageTeam);
+  const { data: permissionCatalog } = usePermissionCatalog(canManagePermissions);
+  const { data: permissionSnapshot, isLoading: permissionsLoading } = useUserPermissions(
+    permissionsTarget?.id
+  );
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
+  const updateUserPermissions = useUpdateUserPermissions();
   const deactivateUser = useDeactivateUser();
   const members = useMemo(() => data?.items ?? [], [data?.items]);
   const totalPages = data?.total_pages ?? 1;
@@ -93,6 +114,21 @@ export default function TeamPage() {
   }, [members]);
   const seatsRemaining = Math.max(0, maxUsers - stats.activeCount);
   const seatLimitReached = seatsRemaining <= 0;
+  const permissionsByCategory = useMemo(() => {
+    const groups: Record<string, typeof permissionCatalog> = {};
+    for (const item of permissionCatalog ?? []) {
+      const category = item.category || "other";
+      if (!groups[category]) groups[category] = [];
+      groups[category]?.push(item);
+    }
+    return groups;
+  }, [permissionCatalog]);
+
+  useEffect(() => {
+    if (permissionSnapshot) {
+      setEditedPermissions(permissionSnapshot.effective_permissions ?? []);
+    }
+  }, [permissionSnapshot]);
 
   const handleInvite = async () => {
     if (seatLimitReached) {
@@ -157,6 +193,45 @@ export default function TeamPage() {
       toast.success("Mot de passe temporaire copie.");
     } catch {
       toast.error("Impossible de copier le mot de passe.");
+    }
+  };
+
+  const openPermissionsDialog = (member: User) => {
+    setPermissionsTarget(member);
+    setPermissionsDialogOpen(true);
+  };
+
+  const togglePermissionSelection = (permission: string) => {
+    setEditedPermissions((prev) => {
+      const set = new Set(prev);
+      if (set.has(permission)) {
+        set.delete(permission);
+      } else {
+        set.add(permission);
+      }
+      return Array.from(set).sort();
+    });
+  };
+
+  const handleSavePermissions = async () => {
+    if (!permissionsTarget || !permissionSnapshot) return;
+    const defaultSet = new Set(permissionSnapshot.default_permissions);
+    const editedSet = new Set(editedPermissions);
+
+    const grants = Array.from(editedSet).filter((perm) => !defaultSet.has(perm));
+    const revokes = Array.from(defaultSet).filter((perm) => !editedSet.has(perm));
+
+    try {
+      await updateUserPermissions.mutateAsync({
+        userId: permissionsTarget.id,
+        grants,
+        revokes,
+      });
+      toast.success("Permissions mises a jour.");
+      setPermissionsDialogOpen(false);
+      setPermissionsTarget(null);
+    } catch {
+      toast.error("Impossible de mettre a jour les permissions.");
     }
   };
 
@@ -299,34 +374,44 @@ export default function TeamPage() {
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex justify-end gap-2">
+                            {canManagePermissions && !isCurrentUser ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1"
+                                onClick={() => openPermissionsDialog(member)}
+                              >
+                                <SlidersHorizontal className="h-3.5 w-3.5" />
+                                Permissions
+                              </Button>
+                            ) : null}
                             {canManageTeam &&
                             !isCurrentUser &&
                             member.role !== "admin" &&
                             member.role !== "super_admin" ? (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => toggleRole(member)}
-                                  isLoading={updateUser.isPending}
-                                >
-                                  {member.role === "user" ? "Promouvoir" : "Retrograder"}
-                                </Button>
-                                {member.is_active ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-danger"
-                                    onClick={() => handleDeactivate(member)}
-                                    isLoading={deactivateUser.isPending}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                ) : null}
-                              </>
-                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => toggleRole(member)}
+                                isLoading={updateUser.isPending}
+                              >
+                                {member.role === "user" ? "Promouvoir" : "Retrograder"}
+                              </Button>
+                            ) : null}
+                            {canManageTeam && !isCurrentUser && member.is_active ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-danger"
+                                onClick={() => handleDeactivate(member)}
+                                isLoading={deactivateUser.isPending}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            ) : null}
+                            {!canManagePermissions && !canManageTeam ? (
                               <span className="text-xs text-muted-foreground">-</span>
-                            )}
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -434,6 +519,77 @@ export default function TeamPage() {
               {passwordCopied ? "Copie" : "Copier"}
             </Button>
             <Button onClick={() => setCreatedCredentials(null)}>Fermer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={permissionsDialogOpen}
+        onOpenChange={(open) => {
+          setPermissionsDialogOpen(open);
+          if (!open) {
+            setPermissionsTarget(null);
+          }
+        }}
+      >
+        <DialogContent onClose={() => setPermissionsDialogOpen(false)}>
+          <DialogHeader>
+            <DialogTitle>
+              Permissions Utilisateur
+              {permissionsTarget ? ` - ${permissionsTarget.email}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          {permissionsLoading || !permissionSnapshot ? (
+            <p className="text-sm text-muted-foreground">Chargement des permissions...</p>
+          ) : (
+            <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+              {Object.entries(permissionsByCategory).map(([category, items]) => (
+                <div key={category} className="rounded-md border border-border p-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {category}
+                  </p>
+                  <div className="space-y-2">
+                    {items?.map((item) => {
+                      const checked = editedPermissions.includes(item.key);
+                      const inherited = permissionSnapshot.default_permissions.includes(item.key);
+                      return (
+                        <label key={item.key} className="flex items-start gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 h-4 w-4 rounded border-border"
+                            checked={checked}
+                            onChange={() => togglePermissionSelection(item.key)}
+                          />
+                          <span>
+                            <span className="font-medium text-slate-900">{item.label}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">{item.key}</span>
+                            <br />
+                            <span className="text-xs text-muted-foreground">{item.description}</span>
+                            {inherited ? (
+                              <span className="ml-2 inline-block text-[11px] text-primary">
+                                (par role)
+                              </span>
+                            ) : null}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPermissionsDialogOpen(false)}>
+              Annuler
+            </Button>
+            <Button
+              onClick={handleSavePermissions}
+              isLoading={updateUserPermissions.isPending}
+              disabled={!permissionSnapshot}
+            >
+              Enregistrer
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

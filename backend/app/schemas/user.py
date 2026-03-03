@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from app.core.roles import ROLE_USER, RoleName
 
@@ -42,6 +42,7 @@ class UserResponse(BaseModel):
 
 class UserMeResponse(UserResponse):
     organization_name: str | None = None
+    effective_permissions: list[str] = Field(default_factory=list)
 
 
 class UserCreateResponse(UserResponse):

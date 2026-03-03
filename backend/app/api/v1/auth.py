@@ -23,6 +23,7 @@ from app.schemas.auth import (
 from app.schemas.common import MessageResponse
 from app.schemas.user import UserMeResponse
 from app.services.auth_service import AuthService
+from app.services.permission_service import PermissionService
 from app.services.rate_limit_service import RateLimitService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -104,6 +105,10 @@ async def get_me(
         )
         org_name = result.scalar_one_or_none()
 
+    effective_permissions = sorted(
+        await PermissionService(db).get_effective_permissions(current_user)
+    )
+
     return UserMeResponse(
         id=current_user.id,
         email=current_user.email,
@@ -114,4 +119,5 @@ async def get_me(
         organization_id=current_user.organization_id,
         created_at=current_user.created_at,
         organization_name=org_name,
+        effective_permissions=effective_permissions,
     )

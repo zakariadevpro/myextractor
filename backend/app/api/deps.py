@@ -6,12 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.exceptions import ForbiddenError, UnauthorizedError
-from app.core.roles import ROLE_ADMIN, ROLE_MANAGER, has_minimum_role
+from app.core.exceptions import UnauthorizedError
 from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.user import User
 from app.services.api_key_service import ApiKeyIdentity, ApiKeyService
+from app.services.permission_service import PermissionService
 
 security = HTTPBearer()
 
@@ -39,15 +39,27 @@ async def get_current_user(
     return user
 
 
-async def get_current_admin(user: User = Depends(get_current_user)) -> User:
-    if not has_minimum_role(user.role, ROLE_ADMIN):
-        raise ForbiddenError("Admin role required")
+async def get_current_manager(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    await PermissionService(db).require_user_permission(user, "access.manager")
     return user
 
 
-async def get_current_manager(user: User = Depends(get_current_user)) -> User:
-    if not has_minimum_role(user.role, ROLE_MANAGER):
-        raise ForbiddenError("Manager role or higher required")
+async def get_current_admin(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    await PermissionService(db).require_user_permission(user, "access.admin")
+    return user
+
+
+async def get_current_super_admin(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    await PermissionService(db).require_user_permission(user, "access.super_admin")
     return user
 
 

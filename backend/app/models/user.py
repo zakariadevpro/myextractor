@@ -36,6 +36,12 @@ class User(Base):
 
     # Relationships
     organization = relationship("Organization", back_populates="users")
+    permission_overrides = relationship(
+        "UserPermission",
+        back_populates="user",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
 
     @property
     def full_name(self) -> str:

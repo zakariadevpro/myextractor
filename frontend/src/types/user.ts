@@ -9,6 +9,7 @@ export interface User {
   is_active: boolean;
   organization_id: string;
   organization_name?: string | null;
+  effective_permissions?: string[];
   created_at: string;
 }
 
@@ -50,4 +51,20 @@ export interface TeamMember {
   role: UserRole;
   invited_at: string;
   joined_at: string | null;
+}
+
+export interface PermissionCatalogItem {
+  key: string;
+  label: string;
+  description: string;
+  category: string;
+}
+
+export interface UserPermissionsSnapshot {
+  user_id: string;
+  role: UserRole;
+  default_permissions: string[];
+  grants: string[];
+  revokes: string[];
+  effective_permissions: string[];
 }

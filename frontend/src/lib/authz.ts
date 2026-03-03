@@ -14,3 +14,12 @@ export function hasMinimumRole(
   if (!role) return false;
   return ROLE_LEVEL[role] >= ROLE_LEVEL[minimumRole];
 }
+
+export function hasPermission(
+  permissions: string[] | undefined,
+  permission: string
+): boolean {
+  if (!permissions || !permission) return false;
+  const wanted = permission.trim().toLowerCase();
+  return permissions.map((item) => item.trim().toLowerCase()).includes(wanted);
+}
