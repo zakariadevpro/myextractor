@@ -4,7 +4,10 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  Copy,
+  KeyRound,
   Mail,
+  ShieldAlert,
   Shield,
   Trash2,
   UserPlus,
@@ -27,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { useCreateUser, useDeactivateUser, useUpdateUser, useUsers } from "@/hooks/use-users";
+import { useCurrentSubscription } from "@/hooks/use-subscriptions";
 import { hasMinimumRole } from "@/lib/authz";
 import { getInitials } from "@/lib/utils";
 import type { User, UserRole } from "@/types/user";
@@ -61,8 +65,14 @@ export default function TeamPage() {
   const [inviteFirstName, setInviteFirstName] = useState("");
   const [inviteLastName, setInviteLastName] = useState("");
   const [inviteRole, setInviteRole] = useState<UserRole>("user");
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    email: string;
+    temporary_password: string;
+  } | null>(null);
+  const [passwordCopied, setPasswordCopied] = useState(false);
 
   const { data, isLoading } = useUsers({ page, page_size: 20 });
+  const { data: currentSubscription } = useCurrentSubscription(canManageTeam);
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const deactivateUser = useDeactivateUser();
@@ -72,6 +82,7 @@ export default function TeamPage() {
   const inviteRoleOptions = canAssignSuperAdmin
     ? [{ value: "super_admin", label: "Super Admin" }, ...roleOptions]
     : roleOptions;
+  const maxUsers = currentSubscription?.plan.max_users ?? 1;
 
   const stats = useMemo(() => {
     const activeCount = members.filter((member) => member.is_active).length;
@@ -80,8 +91,14 @@ export default function TeamPage() {
     const managerCount = members.filter((member) => member.role === "manager").length;
     return { activeCount, superAdminCount, adminCount, managerCount };
   }, [members]);
+  const seatsRemaining = Math.max(0, maxUsers - stats.activeCount);
+  const seatLimitReached = seatsRemaining <= 0;
 
   const handleInvite = async () => {
+    if (seatLimitReached) {
+      toast.error("Limite d'utilisateurs atteinte pour votre plan.");
+      return;
+    }
     if (!inviteEmail || !inviteFirstName || !inviteLastName) {
       toast.error("Veuillez remplir email, prenom et nom.");
       return;
@@ -93,7 +110,12 @@ export default function TeamPage() {
         last_name: inviteLastName,
         role: inviteRole,
       });
-      toast.success(`Membre cree. Mot de passe temporaire: ${created.temporary_password}`);
+      toast.success("Membre cree.");
+      setCreatedCredentials({
+        email: created.email,
+        temporary_password: created.temporary_password,
+      });
+      setPasswordCopied(false);
       setInviteEmail("");
       setInviteFirstName("");
       setInviteLastName("");
@@ -127,6 +149,17 @@ export default function TeamPage() {
     }
   };
 
+  const handleCopyPassword = async () => {
+    if (!createdCredentials) return;
+    try {
+      await navigator.clipboard.writeText(createdCredentials.temporary_password);
+      setPasswordCopied(true);
+      toast.success("Mot de passe temporaire copie.");
+    } catch {
+      toast.error("Impossible de copier le mot de passe.");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -151,7 +184,11 @@ export default function TeamPage() {
               </Button>
             </Link>
             {canManageTeam ? (
-              <Button className="gap-2" onClick={() => setInviteDialogOpen(true)}>
+              <Button
+                className="gap-2"
+                onClick={() => setInviteDialogOpen(true)}
+                disabled={seatLimitReached}
+              >
                 <UserPlus className="h-4 w-4" />
                 Nouveau membre
               </Button>
@@ -160,7 +197,19 @@ export default function TeamPage() {
         }
       />
 
-      <div className="grid gap-4 md:grid-cols-3">
+      {canManageTeam && seatLimitReached ? (
+        <Card className="border-warning/40 bg-warning/5">
+          <CardContent className="flex items-center gap-3 p-4">
+            <ShieldAlert className="h-5 w-5 text-warning" />
+            <p className="text-sm text-slate-800">
+              Limite atteinte: {stats.activeCount}/{maxUsers} utilisateurs actifs. Passez sur un plan
+              supérieur pour ajouter des membres.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-4">
         <MetricCard
           label="Membres"
           value={data?.total ?? 0}
@@ -172,6 +221,12 @@ export default function TeamPage() {
           value={stats.activeCount}
           helper={`${stats.managerCount} managers`}
           icon={<Shield className="h-4 w-4" />}
+        />
+        <MetricCard
+          label="Sieges Actifs"
+          value={`${stats.activeCount}/${maxUsers}`}
+          helper={`${seatsRemaining} disponibles`}
+          icon={<KeyRound className="h-4 w-4" />}
         />
         <MetricCard
           label="Admins+"
@@ -345,9 +400,40 @@ export default function TeamPage() {
             <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>
               Annuler
             </Button>
-            <Button onClick={handleInvite} isLoading={createUser.isPending}>
+            <Button
+              onClick={handleInvite}
+              isLoading={createUser.isPending}
+              disabled={seatLimitReached}
+            >
               Creer membre
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(createdCredentials)} onOpenChange={() => setCreatedCredentials(null)}>
+        <DialogContent onClose={() => setCreatedCredentials(null)}>
+          <DialogHeader>
+            <DialogTitle>Identifiants Temporaires</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              Communique ce mot de passe temporaire au nouvel utilisateur, puis impose un changement au
+              premier login.
+            </p>
+            <Input label="Email" value={createdCredentials?.email ?? ""} readOnly />
+            <Input
+              label="Mot de passe temporaire"
+              value={createdCredentials?.temporary_password ?? ""}
+              readOnly
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="gap-2" onClick={handleCopyPassword}>
+              <Copy className="h-4 w-4" />
+              {passwordCopied ? "Copie" : "Copier"}
+            </Button>
+            <Button onClick={() => setCreatedCredentials(null)}>Fermer</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

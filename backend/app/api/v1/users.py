@@ -9,12 +9,40 @@ from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from app.core.roles import ROLE_SUPER_ADMIN
 from app.core.security import hash_password
 from app.db.session import get_db
+from app.models.subscription import Plan, Subscription
 from app.models.user import User
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.user import UserCreate, UserCreateResponse, UserResponse, UserUpdate
 from app.services.audit_log_service import AuditLogService
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+async def _get_max_users_limit(db: AsyncSession, organization_id: uuid.UUID) -> int:
+    sub_result = await db.execute(
+        select(Plan.max_users)
+        .join(Subscription, Subscription.plan_id == Plan.id)
+        .where(
+            Subscription.organization_id == organization_id,
+            Subscription.status == "active",
+        )
+        .order_by(Subscription.created_at.desc())
+        .limit(1)
+    )
+    max_users = sub_result.scalar_one_or_none()
+    if max_users is not None:
+        return max(1, int(max_users))
+    return 1
+
+
+async def _get_active_users_count(db: AsyncSession, organization_id: uuid.UUID) -> int:
+    count_result = await db.execute(
+        select(func.count()).where(
+            User.organization_id == organization_id,
+            User.is_active.is_(True),
+        )
+    )
+    return int(count_result.scalar() or 0)
 
 
 @router.get("", response_model=PaginatedResponse[UserResponse])
@@ -30,7 +58,9 @@ async def list_users(
     total_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
     total = total_result.scalar() or 0
 
-    result = await db.execute(base_query.offset(offset).limit(page_size).order_by(User.created_at))
+    result = await db.execute(
+        base_query.offset(offset).limit(page_size).order_by(User.created_at.desc())
+    )
     users = result.scalars().all()
 
     return PaginatedResponse(
@@ -48,6 +78,12 @@ async def create_user(
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    email = data.email.strip().lower()
+    first_name = data.first_name.strip()
+    last_name = data.last_name.strip()
+    if not first_name or not last_name:
+        raise BadRequestError("First name and last name are required")
+
     if data.role == ROLE_SUPER_ADMIN and current_user.role != ROLE_SUPER_ADMIN:
         raise ForbiddenError("Only a super admin can assign super admin role")
 
@@ -56,16 +92,21 @@ async def create_user(
 
     temp_password = secrets.token_urlsafe(12)
 
-    existing_result = await db.execute(select(User).where(User.email == data.email))
+    max_users = await _get_max_users_limit(db, current_user.organization_id)
+    active_users = await _get_active_users_count(db, current_user.organization_id)
+    if active_users >= max_users:
+        raise BadRequestError(f"User limit reached for your plan ({active_users}/{max_users}).")
+
+    existing_result = await db.execute(select(User).where(func.lower(User.email) == email))
     if existing_result.scalar_one_or_none():
         raise BadRequestError("Email already registered")
 
     user = User(
         organization_id=current_user.organization_id,
-        email=data.email,
+        email=email,
         password_hash=hash_password(temp_password),
-        first_name=data.first_name,
-        last_name=data.last_name,
+        first_name=first_name,
+        last_name=last_name,
         role=data.role,
     )
     db.add(user)
@@ -112,6 +153,11 @@ async def update_user(
         raise BadRequestError("Cannot change your own role")
     if user.id == current_user.id and data.is_active is False:
         raise BadRequestError("Cannot deactivate yourself")
+    if data.is_active is True and not user.is_active:
+        max_users = await _get_max_users_limit(db, current_user.organization_id)
+        active_users = await _get_active_users_count(db, current_user.organization_id)
+        if active_users >= max_users:
+            raise BadRequestError(f"User limit reached for your plan ({active_users}/{max_users}).")
 
     if user.role == ROLE_SUPER_ADMIN and data.role and data.role != ROLE_SUPER_ADMIN:
         active_super_admins_result = await db.execute(
