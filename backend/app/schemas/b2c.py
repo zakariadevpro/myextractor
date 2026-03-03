@@ -37,3 +37,16 @@ class B2CLeadIntakeCreate(BaseModel):
         if self.double_opt_in and self.double_opt_in_at is None:
             self.double_opt_in_at = self.consent_at
         return self
+
+
+class B2CCsvImportError(BaseModel):
+    row_number: int
+    message: str
+
+
+class B2CCsvImportSummary(BaseModel):
+    total_rows: int
+    imported: int
+    duplicates: int
+    failed: int
+    errors: list[B2CCsvImportError] = Field(default_factory=list)

@@ -129,3 +129,16 @@ export interface B2CLeadIntakePayload {
   double_opt_in?: boolean;
   double_opt_in_at?: string | null;
 }
+
+export interface B2CCsvImportError {
+  row_number: number;
+  message: string;
+}
+
+export interface B2CCsvImportSummary {
+  total_rows: number;
+  imported: number;
+  duplicates: number;
+  failed: number;
+  errors: B2CCsvImportError[];
+}

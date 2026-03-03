@@ -1,10 +1,11 @@
 import csv
 import io
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from sqlalchemy import func, or_, select
@@ -18,7 +19,7 @@ from app.db.session import get_db
 from app.models.lead import Lead
 from app.models.lead_consent import LeadConsent
 from app.models.user import User
-from app.schemas.b2c import B2CLeadIntakeCreate
+from app.schemas.b2c import B2CCsvImportError, B2CCsvImportSummary, B2CLeadIntakeCreate
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.lead import (
     LeadFilters,
@@ -49,6 +50,82 @@ def _sanitize_csv_cell(value: str | None) -> str:
     if text and text[0] in ("=", "+", "-", "@", "\t", "\r"):
         return f"'{text}"
     return text
+
+
+def _normalize_mapping_payload(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise BadRequestError(f"Invalid mapping JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise BadRequestError("Mapping must be a JSON object")
+    normalized: dict[str, str] = {}
+    for key, value in parsed.items():
+        key_text = str(key or "").strip()
+        value_text = str(value or "").strip()
+        if key_text and value_text:
+            normalized[key_text] = value_text
+    return normalized
+
+
+def _normalize_defaults_payload(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise BadRequestError(f"Invalid defaults JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise BadRequestError("Defaults must be a JSON object")
+    normalized: dict[str, str] = {}
+    for key, value in parsed.items():
+        key_text = str(key or "").strip()
+        if not key_text or value is None:
+            continue
+        normalized[key_text] = str(value).strip()
+    return normalized
+
+
+def _parse_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    lowered = str(value).strip().lower()
+    if not lowered:
+        return default
+    return lowered in {"1", "true", "yes", "oui", "y", "on"}
+
+
+def _pick_csv_dialect(content_sample: str) -> csv.Dialect:
+    sample = content_sample[:4096]
+    if not sample.strip():
+        raise BadRequestError("CSV file is empty")
+    try:
+        return csv.Sniffer().sniff(sample, delimiters=",;\t|")
+    except csv.Error:
+        return csv.excel
+
+
+def _extract_row_value(
+    *,
+    row: dict[str, str],
+    mapping: dict[str, str],
+    defaults: dict[str, str],
+    key: str,
+) -> str | None:
+    mapped_column = mapping.get(key)
+    if mapped_column:
+        for col_name, col_value in row.items():
+            if str(col_name or "").strip() == mapped_column:
+                text_value = str(col_value or "").strip()
+                if text_value:
+                    return text_value
+    default_value = defaults.get(key)
+    if default_value is not None:
+        clean_default = str(default_value).strip()
+        return clean_default or None
+    return None
 
 
 def _apply_filters(query, filters: LeadFilters, org_id: uuid.UUID):
@@ -569,6 +646,230 @@ async def intake_b2c_lead(
         source_context="manual_api",
     )
     return LeadResponse.model_validate(lead)
+
+
+@router.post("/b2c/intake/csv", response_model=B2CCsvImportSummary)
+async def intake_b2c_csv(
+    file: UploadFile = File(...),
+    mapping: str = Form(...),
+    defaults: str | None = Form(default=None),
+    current_user: User = Depends(get_current_manager),
+    db: AsyncSession = Depends(get_db),
+):
+    if not settings.b2c_mode_enabled:
+        raise BadRequestError("B2C mode is disabled on this environment")
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise BadRequestError("Only .csv files are supported")
+
+    mapping_payload = _normalize_mapping_payload(mapping)
+    defaults_payload = _normalize_defaults_payload(defaults)
+
+    has_full_name_mapping = bool(mapping_payload.get("full_name"))
+    has_split_name_mapping = bool(mapping_payload.get("first_name")) and bool(
+        mapping_payload.get("last_name")
+    )
+    if not has_full_name_mapping and not has_split_name_mapping:
+        raise BadRequestError("Mapping requires full_name or first_name + last_name")
+
+    content_bytes = await file.read()
+    if not content_bytes:
+        raise BadRequestError("CSV file is empty")
+
+    try:
+        content = content_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            content = content_bytes.decode("latin-1")
+        except UnicodeDecodeError as exc:
+            raise BadRequestError(f"Unsupported CSV encoding: {exc}") from exc
+
+    dialect = _pick_csv_dialect(content)
+    reader = csv.DictReader(io.StringIO(content), dialect=dialect)
+    if not reader.fieldnames:
+        raise BadRequestError("CSV header is missing")
+
+    total_rows = 0
+    imported = 0
+    duplicates = 0
+    failed = 0
+    errors: list[B2CCsvImportError] = []
+    timestamp = datetime.now(timezone.utc)
+    proof_prefix = defaults_payload.get("proof_prefix", "csv-b2c-import")
+    service = B2CIntakeService(db)
+
+    for index, row in enumerate(reader, start=2):
+        total_rows += 1
+        row_clean = {
+            str(key or "").strip(): str(value or "").strip()
+            for key, value in (row or {}).items()
+            if key is not None
+        }
+        if not any(row_clean.values()):
+            continue
+
+        full_name = _extract_row_value(
+            row=row_clean,
+            mapping=mapping_payload,
+            defaults=defaults_payload,
+            key="full_name",
+        )
+        if not full_name:
+            first_name = _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="first_name",
+            )
+            last_name = _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="last_name",
+            )
+            full_name = " ".join(part for part in [first_name, last_name] if part).strip()
+
+        consent_at_raw = _extract_row_value(
+            row=row_clean,
+            mapping=mapping_payload,
+            defaults=defaults_payload,
+            key="consent_at",
+        )
+        consent_at = consent_at_raw or timestamp.isoformat()
+
+        consent_proof_ref = (
+            _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="consent_proof_ref",
+            )
+            or f"{proof_prefix}-{timestamp.strftime('%Y%m%d%H%M%S')}-{index:06d}"
+        )
+
+        payload = {
+            "full_name": full_name or "",
+            "email": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="email",
+            ),
+            "phone": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="phone",
+            ),
+            "city": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="city",
+            ),
+            "consent_source": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="consent_source",
+            )
+            or "crm_import",
+            "consent_at": consent_at,
+            "consent_text_version": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="consent_text_version",
+            )
+            or "v1.0",
+            "consent_proof_ref": consent_proof_ref,
+            "privacy_policy_version": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="privacy_policy_version",
+            )
+            or "pp-2026-01",
+            "source_campaign": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="source_campaign",
+            ),
+            "source_channel": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="source_channel",
+            ),
+            "purpose": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="purpose",
+            )
+            or "prospection_commerciale",
+            "double_opt_in": _parse_bool(
+                _extract_row_value(
+                    row=row_clean,
+                    mapping=mapping_payload,
+                    defaults=defaults_payload,
+                    key="double_opt_in",
+                ),
+                default=False,
+            ),
+            "double_opt_in_at": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="double_opt_in_at",
+            ),
+            "data_retention_until": _extract_row_value(
+                row=row_clean,
+                mapping=mapping_payload,
+                defaults=defaults_payload,
+                key="data_retention_until",
+            ),
+        }
+
+        try:
+            validated = B2CLeadIntakeCreate.model_validate(payload)
+            async with db.begin_nested():
+                lead = await service.intake_for_org(
+                    organization_id=current_user.organization_id,
+                    data=validated,
+                    actor_user_id=current_user.id,
+                    action="lead.b2c_intake_csv",
+                    source_context="csv_import",
+                )
+            imported += 1
+            if bool(getattr(lead, "is_duplicate", False)):
+                duplicates += 1
+        except Exception as exc:
+            failed += 1
+            if len(errors) < 100:
+                errors.append(B2CCsvImportError(row_number=index, message=str(exc)))
+
+    await AuditLogService(db).log(
+        action="lead.b2c_csv_import",
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        resource_type="lead",
+        details={
+            "filename": file.filename,
+            "total_rows": total_rows,
+            "imported": imported,
+            "duplicates": duplicates,
+            "failed": failed,
+        },
+    )
+
+    return B2CCsvImportSummary(
+        total_rows=total_rows,
+        imported=imported,
+        duplicates=duplicates,
+        failed=failed,
+        errors=errors,
+    )
 
 
 @router.get("/{lead_id}/consent", response_model=LeadConsentResponse)

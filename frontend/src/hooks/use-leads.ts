@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import apiClient from "@/lib/api-client";
 import type {
+  B2CCsvImportSummary,
   B2CLeadIntakePayload,
   Lead,
   LeadConsent,
@@ -176,6 +177,39 @@ export function useCreateB2CLeadIntake() {
   return useMutation({
     mutationFn: async (payload: B2CLeadIntakePayload) => {
       const response = await apiClient.post<Lead>("/leads/b2c/intake", payload);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useImportB2CCsvIntake() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      file,
+      mapping,
+      defaults,
+    }: {
+      file: File;
+      mapping: Record<string, string>;
+      defaults?: Record<string, string | boolean>;
+    }) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("mapping", JSON.stringify(mapping));
+      if (defaults) {
+        formData.append("defaults", JSON.stringify(defaults));
+      }
+      const response = await apiClient.post<B2CCsvImportSummary>("/leads/b2c/intake/csv", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
       return response.data;
     },
     onSuccess: () => {

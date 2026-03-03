@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.config import settings
@@ -208,3 +210,54 @@ async def test_dashboard_b2c_compliance_returns_metrics(
     by_source = {row["source"]: row["count"] for row in data["by_source"]}
     assert by_source["web_form"] == 1
     assert by_source["meta_lead_ads"] == 1
+
+
+@pytest.mark.asyncio
+async def test_b2c_csv_import_with_manual_mapping(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(settings, "b2c_mode_enabled", True)
+
+    csv_content = "\n".join(
+        [
+            "prenom;nom;mail;tel;ville;preuve;campagne",
+            "Jean;Dupont;jean.dupont@example.com;+33612345678;Paris;proof-csv-001;Campagne A",
+            "Marie;Durand;marie.durand@example.com;+33698765432;Lyon;proof-csv-002;Campagne B",
+        ]
+    )
+    mapping = {
+        "first_name": "prenom",
+        "last_name": "nom",
+        "email": "mail",
+        "phone": "tel",
+        "city": "ville",
+        "consent_proof_ref": "preuve",
+        "source_campaign": "campagne",
+    }
+    defaults = {
+        "consent_source": "crm_import",
+        "consent_text_version": "v1.0",
+        "privacy_policy_version": "pp-2026-01",
+        "source_channel": "import",
+        "purpose": "prospection_commerciale",
+    }
+
+    response = await client.post(
+        "/api/v1/leads/b2c/intake/csv",
+        headers=auth_headers,
+        data={"mapping": json.dumps(mapping), "defaults": json.dumps(defaults)},
+        files={"file": ("import-b2c.csv", csv_content, "text/csv")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_rows"] == 2
+    assert body["imported"] == 2
+    assert body["failed"] == 0
+
+    leads = await client.get(
+        "/api/v1/leads",
+        params={"lead_kind": "b2c"},
+        headers=auth_headers,
+    )
+    assert leads.status_code == 200
+    leads_body = leads.json()
+    assert leads_body["total"] == 2
