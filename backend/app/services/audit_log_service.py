@@ -1,10 +1,11 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import distinct, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
+from app.models.extraction import ExtractionJob
 
 
 class AuditLogService:
@@ -84,6 +85,84 @@ class AuditLogService:
             .limit(20)
         )
         action_rows = (await self.db.execute(action_q)).all()
+
+        extraction_where = (
+            ExtractionJob.organization_id == organization_id,
+            ExtractionJob.created_at >= since,
+        )
+        total_jobs = (
+            await self.db.execute(
+                select(func.count()).where(*extraction_where)
+            )
+        ).scalar() or 0
+        completed_jobs = (
+            await self.db.execute(
+                select(func.count()).where(
+                    *extraction_where,
+                    ExtractionJob.status == "completed",
+                )
+            )
+        ).scalar() or 0
+        failed_jobs = (
+            await self.db.execute(
+                select(func.count()).where(
+                    *extraction_where,
+                    ExtractionJob.status == "failed",
+                )
+            )
+        ).scalar() or 0
+        running_jobs = (
+            await self.db.execute(
+                select(func.count()).where(
+                    *extraction_where,
+                    ExtractionJob.status == "running",
+                )
+            )
+        ).scalar() or 0
+        avg_leads_found = (
+            await self.db.execute(
+                select(func.coalesce(func.avg(ExtractionJob.leads_found), 0.0)).where(
+                    *extraction_where,
+                    ExtractionJob.status == "completed",
+                )
+            )
+        ).scalar() or 0.0
+        avg_duration_seconds = (
+            await self.db.execute(
+                select(
+                    func.coalesce(
+                        func.avg(
+                            func.extract(
+                                "epoch",
+                                ExtractionJob.completed_at - ExtractionJob.started_at,
+                            )
+                        ),
+                        0.0,
+                    )
+                ).where(
+                    *extraction_where,
+                    ExtractionJob.completed_at.is_not(None),
+                    ExtractionJob.started_at.is_not(None),
+                )
+            )
+        ).scalar() or 0.0
+        filtered_non_b2b_total = (
+            await self.db.execute(
+                text(
+                    """
+                    SELECT COALESCE(SUM(COALESCE(NULLIF(details->>'filtered_non_b2b', '')::int, 0)), 0)
+                    FROM audit_logs
+                    WHERE organization_id = :org_id
+                      AND action = 'extraction.analytics'
+                      AND created_at >= :since
+                    """
+                ),
+                {"org_id": organization_id, "since": since},
+            )
+        ).scalar() or 0
+
+        success_rate = (float(completed_jobs) / float(total_jobs) * 100.0) if total_jobs else 0.0
+
         return {
             "since_hours": since_hours,
             "total_events": total,
@@ -92,4 +171,14 @@ class AuditLogService:
                 {"action": action_name, "count": int(action_count)}
                 for action_name, action_count in action_rows
             ],
+            "extraction_metrics": {
+                "total_jobs": int(total_jobs),
+                "completed_jobs": int(completed_jobs),
+                "failed_jobs": int(failed_jobs),
+                "running_jobs": int(running_jobs),
+                "success_rate_pct": round(success_rate, 2),
+                "avg_leads_found": round(float(avg_leads_found), 2),
+                "avg_duration_seconds": round(float(avg_duration_seconds), 2),
+                "filtered_non_b2b_total": int(filtered_non_b2b_total),
+            },
         }

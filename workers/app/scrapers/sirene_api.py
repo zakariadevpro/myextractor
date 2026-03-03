@@ -1,9 +1,10 @@
 import logging
-from urllib.parse import quote_plus
 
 import httpx
 
 from app.scrapers.base import BaseScraper, ScrapedLead
+from app.scrapers.proxy_pool import proxy_pool
+from app.scrapers.resilience import jitter_sleep, pick_user_agent, run_with_retries
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,10 @@ class SireneApiScraper(BaseScraper):
     source_name = "sirene_api"
 
     def __init__(self):
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self._default_headers = {
+            "User-Agent": pick_user_agent(),
+            "Accept": "application/json",
+        }
 
     async def search(
         self,
@@ -86,9 +90,12 @@ class SireneApiScraper(BaseScraper):
             }
 
             try:
-                response = await self.client.get(BASE_URL, params=params)
-                response.raise_for_status()
-                data = response.json()
+                data = await run_with_retries(
+                    f"sirene_api.page_{page}",
+                    lambda p=params: self._fetch_page(p),
+                )
+                # Small delay to keep API usage smooth and avoid burst throttling.
+                await jitter_sleep(0.15, 0.45)
             except Exception as e:
                 logger.error(f"Sirene API request failed (page {page}): {e}")
                 break
@@ -113,6 +120,19 @@ class SireneApiScraper(BaseScraper):
 
         logger.info(f"Sirene API: found {len(leads)} companies for '{query}'")
         return leads
+
+    async def _fetch_page(self, params: dict) -> dict:
+        proxy_url = proxy_pool.next_proxy_url()
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers=self._default_headers,
+            proxy=proxy_url,
+        ) as client:
+            response = await client.get(BASE_URL, params=params)
+            if response.status_code in {429, 500, 502, 503, 504}:
+                raise RuntimeError(f"Retryable Sirene status code: {response.status_code}")
+            response.raise_for_status()
+            return response.json()
 
     def _parse_company(self, company: dict) -> ScrapedLead | None:
         """Parse a company from Sirene API response into a ScrapedLead."""
@@ -179,4 +199,4 @@ class SireneApiScraper(BaseScraper):
             return None
 
     async def close(self):
-        await self.client.aclose()
+        return None

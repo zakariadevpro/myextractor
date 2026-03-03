@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import re
 from urllib.parse import quote_plus
@@ -6,8 +5,11 @@ from urllib.parse import quote_plus
 from playwright.async_api import Page, async_playwright
 
 from app.browser.anti_detect import apply_stealth
+from app.config import settings
 from app.parsers.contact_parser import extract_emails, extract_phones
 from app.scrapers.base import BaseScraper, ScrapedLead
+from app.scrapers.proxy_pool import proxy_pool
+from app.scrapers.resilience import jitter_sleep, pick_user_agent, run_with_retries
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +58,17 @@ class PagesJaunesScraper(BaseScraper):
 
     async def _init_browser(self):
         if not self.playwright:
+            launch_kwargs = {"headless": True}
+            proxy_config = proxy_pool.next_playwright_proxy()
+            if proxy_config:
+                launch_kwargs["proxy"] = proxy_config
             self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch(headless=True)
+            self.browser = await self.playwright.chromium.launch(**launch_kwargs)
             self.context = await self.browser.new_context(
                 viewport={"width": 1280, "height": 800},
                 locale="fr-FR",
                 timezone_id="Europe/Paris",
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                user_agent=pick_user_agent(),
             )
 
     async def search(
@@ -84,15 +90,22 @@ class PagesJaunesScraper(BaseScraper):
         try:
             # Navigate to Pages Jaunes search
             search_url = f"https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui={quote_plus(query)}&ou={quote_plus(where)}"
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
-            await asyncio.sleep(3)
+            await run_with_retries(
+                "pages_jaunes.goto",
+                lambda: page.goto(
+                    search_url,
+                    wait_until="domcontentloaded",
+                    timeout=max(30000, int(settings.request_delay_seconds * 1000) * 30),
+                ),
+            )
+            await jitter_sleep(2.0, 3.2)
 
             # Handle cookie consent
             try:
                 consent = page.locator('#didomi-notice-agree-button')
                 if await consent.count() > 0:
                     await consent.click()
-                    await asyncio.sleep(1)
+                    await jitter_sleep(0.6, 1.3)
             except Exception:
                 pass
 
@@ -118,6 +131,7 @@ class PagesJaunesScraper(BaseScraper):
                         lead = await self._extract_lead_from_card(result_items.nth(i))
                         if lead:
                             leads.append(lead)
+                        await jitter_sleep(0.15, 0.45)
                     except Exception as e:
                         logger.debug(f"Failed to extract PJ lead {i}: {e}")
                         continue
@@ -127,8 +141,12 @@ class PagesJaunesScraper(BaseScraper):
                 next_btn = page.locator('#pagination-next, a.link_pagination.next')
                 if await next_btn.count() > 0 and len(leads) < max_results:
                     try:
-                        await next_btn.first.click()
-                        await asyncio.sleep(3)
+                        await run_with_retries(
+                            "pages_jaunes.next_page",
+                            lambda: next_btn.first.click(timeout=10000),
+                            retries=2,
+                        )
+                        await jitter_sleep(2.0, 3.0)
                     except Exception:
                         break
                 else:

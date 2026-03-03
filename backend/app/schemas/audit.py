@@ -22,8 +22,20 @@ class AuditActionCount(BaseModel):
     count: int
 
 
+class AuditExtractionMetrics(BaseModel):
+    total_jobs: int
+    completed_jobs: int
+    failed_jobs: int
+    running_jobs: int
+    success_rate_pct: float
+    avg_leads_found: float
+    avg_duration_seconds: float
+    filtered_non_b2b_total: int
+
+
 class AuditSummaryResponse(BaseModel):
     since_hours: int
     total_events: int
     unique_actors: int
     events_by_action: list[AuditActionCount]
+    extraction_metrics: AuditExtractionMetrics

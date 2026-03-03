@@ -26,6 +26,16 @@ export function useAuditSummary(sinceHours = 24) {
       total_events: 0,
       unique_actors: 0,
       events_by_action: [],
+      extraction_metrics: {
+        total_jobs: 0,
+        completed_jobs: 0,
+        failed_jobs: 0,
+        running_jobs: 0,
+        success_rate_pct: 0,
+        avg_leads_found: 0,
+        avg_duration_seconds: 0,
+        filtered_non_b2b_total: 0,
+      },
     },
   });
 }

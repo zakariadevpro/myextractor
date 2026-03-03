@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import unicodedata
 import uuid
 from datetime import datetime, timezone
@@ -35,6 +36,76 @@ COMPANY_LEGAL_SUFFIXES = {
     "selarl",
     "holding",
 }
+PERSONAL_EMAIL_DOMAINS = {
+    "gmail.com",
+    "hotmail.com",
+    "outlook.com",
+    "live.com",
+    "yahoo.com",
+    "yahoo.fr",
+    "icloud.com",
+    "proton.me",
+    "protonmail.com",
+    "orange.fr",
+    "wanadoo.fr",
+    "free.fr",
+    "laposte.net",
+    "gmx.fr",
+}
+B2B_HINT_TOKENS = {
+    "entreprise",
+    "societe",
+    "cabinet",
+    "agence",
+    "atelier",
+    "garage",
+    "restaurant",
+    "hotel",
+    "immobilier",
+    "consulting",
+    "services",
+    "transport",
+    "batiment",
+    "travaux",
+    "plomberie",
+    "electricite",
+    "boulangerie",
+    "boucherie",
+    "pharmacie",
+    "clinique",
+    "veterinaire",
+    "commerce",
+    "boutique",
+}
+CIVILITY_TOKENS = {"mr", "mme", "mlle", "monsieur", "madame", "mademoiselle"}
+COMMON_FIRST_NAMES = {
+    "jean",
+    "marie",
+    "pierre",
+    "paul",
+    "jacques",
+    "louis",
+    "nicolas",
+    "antoine",
+    "julien",
+    "sophie",
+    "camille",
+    "lea",
+    "emma",
+    "lucas",
+    "hugo",
+    "thomas",
+    "alexandre",
+    "mehdi",
+    "karim",
+    "kevin",
+    "sarah",
+    "laura",
+    "manon",
+    "chloe",
+    "nathalie",
+    "isabelle",
+}
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 DEFAULT_SCORING_WEIGHTS = {
     "valid_email": 22,
@@ -45,6 +116,10 @@ DEFAULT_SCORING_WEIGHTS = {
     "mobile_phone": 5,
     "landline_phone": 3,
     "website": 10,
+    "pro_email_bonus": 10,
+    "email_website_domain_match_bonus": 6,
+    "multi_phone_bonus": 4,
+    "full_contact_profile_bonus": 6,
     "address_3_fields": 10,
     "address_2_fields": 6,
     "siren": 12,
@@ -135,6 +210,50 @@ def _clean_phone_list(phones: list[str]) -> list[str]:
     return cleaned[:5]
 
 
+def _email_domain(email: str) -> str:
+    value = (email or "").strip().lower()
+    if "@" not in value:
+        return ""
+    return value.rsplit("@", 1)[1]
+
+
+def _has_professional_email(lead: ScrapedLead) -> bool:
+    for email in lead.emails or []:
+        domain = _email_domain(email)
+        if domain and domain not in PERSONAL_EMAIL_DOMAINS:
+            return True
+    return False
+
+
+def _website_domain(website: str | None) -> str:
+    canonical = _canonical_website(website)
+    if not canonical:
+        return ""
+    netloc = urlparse(canonical).netloc.lower()
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return netloc
+
+
+def _has_email_website_domain_match(lead: ScrapedLead) -> bool:
+    site_domain = _website_domain(lead.website)
+    if not site_domain:
+        return False
+    for email in lead.emails or []:
+        email_domain = _email_domain(email)
+        if not email_domain:
+            continue
+        if email_domain == site_domain:
+            return True
+        if site_domain.endswith(f".{email_domain}") or email_domain.endswith(f".{site_domain}"):
+            return True
+    return False
+
+
+def _professional_email_count(lead: ScrapedLead) -> int:
+    return sum(1 for email in (lead.emails or []) if _email_domain(email) not in PERSONAL_EMAIL_DOMAINS)
+
+
 def _normalize_phone_for_storage(phone: str) -> str | None:
     normalized = re.sub(r"[^\d+]", "", (phone or "").strip())
     if len(normalized) < 10:
@@ -216,12 +335,23 @@ def _compute_initial_quality(
         score += scoring_weights.get("valid_email", 22)
         if len(lead.emails) > 1:
             score += scoring_weights.get("extra_email", 4)
+        if _has_professional_email(lead):
+            score += scoring_weights.get("pro_email_bonus", settings.contact_pro_email_bonus)
+        if _has_email_website_domain_match(lead):
+            score += scoring_weights.get(
+                "email_website_domain_match_bonus",
+                settings.contact_email_website_domain_match_bonus,
+            )
     if lead.phones:
         score += scoring_weights.get("valid_phone", 14)
         if any(_detect_phone_type(phone) == "mobile" for phone in lead.phones):
             score += scoring_weights.get("mobile_phone", 5)
+        if len(lead.phones) > 1:
+            score += scoring_weights.get("multi_phone_bonus", settings.contact_multi_phone_bonus)
     if lead.website:
         score += scoring_weights.get("website", 10)
+    if lead.website and lead.phones and _has_professional_email(lead):
+        score += scoring_weights.get("full_contact_profile_bonus", settings.contact_full_profile_bonus)
     if lead.address and lead.postal_code and lead.city:
         score += scoring_weights.get("address_3_fields", 10)
     if lead.siren:
@@ -254,6 +384,68 @@ def _sanitize_scraped_lead(lead: ScrapedLead) -> ScrapedLead | None:
     lead.emails = _clean_email_list(lead.emails or [])
     lead.phones = _clean_phone_list(lead.phones or [])
     return lead
+
+
+def _is_likely_individual_name(company_name: str) -> bool:
+    normalized = _normalize_text(company_name)
+    if not normalized:
+        return False
+    tokens = [tok for tok in re.split(r"[^a-z0-9]+", normalized) if tok]
+    if not tokens:
+        return False
+    if any(tok in CIVILITY_TOKENS for tok in tokens):
+        return True
+    if len(tokens) in {2, 3} and all(tok.isalpha() for tok in tokens):
+        if tokens[0] in COMMON_FIRST_NAMES:
+            return True
+    return False
+
+
+def _has_business_name_hints(company_name: str) -> bool:
+    normalized = _normalize_text(company_name)
+    if not normalized:
+        return False
+    tokens = [tok for tok in re.split(r"[^a-z0-9]+", normalized) if tok]
+    token_set = set(tokens)
+    if token_set.intersection(COMPANY_LEGAL_SUFFIXES):
+        return True
+    if token_set.intersection(B2B_HINT_TOKENS):
+        return True
+    return False
+
+
+def _is_b2b_candidate(lead: ScrapedLead) -> bool:
+    # Strong business signals first.
+    if lead.siren or lead.naf_code:
+        return True
+    if _has_business_name_hints(lead.company_name):
+        return True
+    if _has_professional_email(lead):
+        return True
+    if lead.website:
+        return True
+    if lead.sector and len(_normalize_text(lead.sector)) >= 3:
+        return True
+
+    # Reject records that look like person names and have no business signal.
+    if _is_likely_individual_name(lead.company_name):
+        return False
+
+    # Strict B2B mode: unknown entities are rejected by default.
+    return False
+
+
+def _enforce_b2b_only(leads: list[ScrapedLead]) -> tuple[list[ScrapedLead], int]:
+    if not settings.b2b_strict_mode:
+        return leads, 0
+    kept: list[ScrapedLead] = []
+    filtered_out = 0
+    for lead in leads:
+        if _is_b2b_candidate(lead):
+            kept.append(lead)
+        else:
+            filtered_out += 1
+    return kept, filtered_out
 
 
 def _lead_key(lead: ScrapedLead) -> str | None:
@@ -494,7 +686,7 @@ def _run_post_extraction_workflows(db, organization_id: str, job_id: str) -> dic
               ) AS phone_count
             FROM leads l
             WHERE l.organization_id = :org_id
-              AND l.extraction_job_id = :job_id::uuid
+              AND l.extraction_job_id = CAST(:job_id AS uuid)
             """
         ),
         {"org_id": organization_id, "job_id": job_id},
@@ -535,7 +727,7 @@ def _run_post_extraction_workflows(db, organization_id: str, job_id: str) -> dic
                         source = COALESCE(:source, source),
                         is_duplicate = COALESCE(:is_duplicate, is_duplicate),
                         updated_at = :updated_at
-                    WHERE id = :lead_id::uuid
+                    WHERE id = CAST(:lead_id AS uuid)
                     """
                 ),
                 {
@@ -578,6 +770,7 @@ def _run_post_extraction_workflows(db, organization_id: str, job_id: str) -> dic
 def execute_scraping(self, job_id: str):
     """Execute a scraping job."""
     db = SessionLocal()
+    job_started_monotonic = time.monotonic()
     try:
         # Get job details
         result = db.execute(
@@ -631,6 +824,20 @@ def execute_scraping(self, job_id: str):
                 scraped_leads,
                 max_results=max_leads,
             )
+
+        raw_scraped_count = len(scraped_leads)
+        scraped_leads, filtered_non_b2b = _enforce_b2b_only(scraped_leads)
+        if len(scraped_leads) > max_leads:
+            scraped_leads = scraped_leads[:max_leads]
+        leads_with_phone = sum(1 for lead in scraped_leads if lead.phones)
+        leads_with_pro_email = sum(1 for lead in scraped_leads if _professional_email_count(lead) > 0)
+        logger.info(
+            "Job %s B2B filtering: raw=%s kept=%s filtered_non_b2b=%s",
+            job_id,
+            raw_scraped_count,
+            len(scraped_leads),
+            filtered_non_b2b,
+        )
 
         # Store leads in database
         leads_new = 0
@@ -772,7 +979,7 @@ def execute_scraping(self, job_id: str):
                     INSERT INTO audit_logs (
                         id, organization_id, actor_user_id, action, resource_type, resource_id, details
                     ) VALUES (
-                        :id::uuid, :org_id::uuid, NULL, 'workflow.auto_run', 'workflow', :resource_id, :details::json
+                        CAST(:id AS uuid), CAST(:org_id AS uuid), NULL, 'workflow.auto_run', 'workflow', :resource_id, CAST(:details AS json)
                     )
                     """
                 ),
@@ -790,6 +997,42 @@ def execute_scraping(self, job_id: str):
                     ),
                 },
             )
+
+        duration_seconds = int(max(0, time.monotonic() - job_started_monotonic))
+        db.execute(
+            text(
+                """
+                INSERT INTO audit_logs (
+                    id, organization_id, actor_user_id, action, resource_type, resource_id, details
+                ) VALUES (
+                    CAST(:id AS uuid), CAST(:org_id AS uuid), CAST(:actor_user_id AS uuid), 'extraction.analytics', 'extraction_job', :resource_id, CAST(:details AS json)
+                )
+                """
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "org_id": str(job["organization_id"]),
+                "actor_user_id": str(job["created_by"]),
+                "resource_id": job_id,
+                "details": json.dumps(
+                    {
+                        "source": source,
+                        "keywords_count": len(keywords),
+                        "max_leads": max_leads,
+                        "raw_scraped": raw_scraped_count,
+                        "filtered_non_b2b": filtered_non_b2b,
+                        "kept_b2b": len(scraped_leads),
+                        "with_phone": leads_with_phone,
+                        "with_professional_email": leads_with_pro_email,
+                        "leads_new": leads_new,
+                        "leads_duplicate": leads_duplicate,
+                        "duration_seconds": duration_seconds,
+                        "workflows_triggered": workflow_summary["workflows"],
+                        "workflow_updates": workflow_summary["updated"],
+                    }
+                ),
+            },
+        )
 
         # Mark job as completed
         db.execute(
@@ -815,6 +1058,44 @@ def execute_scraping(self, job_id: str):
         logger.error(f"Job {job_id} failed: {e}")
         db.rollback()
         try:
+            duration_seconds = int(max(0, time.monotonic() - job_started_monotonic))
+            job_for_audit = db.execute(
+                text("SELECT organization_id, created_by, source FROM extraction_jobs WHERE id = :id"),
+                {"id": job_id},
+            ).mappings().first()
+            if job_for_audit:
+                try:
+                    db.execute(
+                        text(
+                            """
+                            INSERT INTO audit_logs (
+                                id, organization_id, actor_user_id, action, resource_type, resource_id, details
+                            ) VALUES (
+                                CAST(:id AS uuid), CAST(:org_id AS uuid), CAST(:actor_user_id AS uuid), 'extraction.analytics', 'extraction_job', :resource_id, CAST(:details AS json)
+                            )
+                            """
+                        ),
+                        {
+                            "id": str(uuid.uuid4()),
+                            "org_id": str(job_for_audit["organization_id"]),
+                            "actor_user_id": str(job_for_audit["created_by"]),
+                            "resource_id": job_id,
+                            "details": json.dumps(
+                                {
+                                    "source": job_for_audit["source"],
+                                    "status": "failed",
+                                    "duration_seconds": duration_seconds,
+                                    "error": str(e)[:500],
+                                }
+                            ),
+                        },
+                    )
+                except Exception as audit_exc:
+                    logger.warning(
+                        "Failed to insert extraction.analytics failure audit for job %s: %s",
+                        job_id,
+                        audit_exc,
+                    )
             db.execute(
                 text("""
                     UPDATE extraction_jobs

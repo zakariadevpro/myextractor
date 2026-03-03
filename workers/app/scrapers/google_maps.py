@@ -1,12 +1,14 @@
-import asyncio
 import logging
 import re
 
 from playwright.async_api import Page, async_playwright
 
 from app.browser.anti_detect import apply_stealth
+from app.config import settings
 from app.parsers.contact_parser import extract_emails, extract_phones
 from app.scrapers.base import BaseScraper, ScrapedLead
+from app.scrapers.proxy_pool import proxy_pool
+from app.scrapers.resilience import jitter_sleep, pick_user_agent, run_with_retries
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +23,17 @@ class GoogleMapsScraper(BaseScraper):
 
     async def _init_browser(self):
         if not self.playwright:
+            launch_kwargs = {"headless": True}
+            proxy_config = proxy_pool.next_playwright_proxy()
+            if proxy_config:
+                launch_kwargs["proxy"] = proxy_config
             self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch(headless=True)
+            self.browser = await self.playwright.chromium.launch(**launch_kwargs)
             self.context = await self.browser.new_context(
                 viewport={"width": 1280, "height": 800},
                 locale="fr-FR",
                 timezone_id="Europe/Paris",
+                user_agent=pick_user_agent(),
             )
 
     async def search(
@@ -49,15 +56,22 @@ class GoogleMapsScraper(BaseScraper):
         try:
             # Navigate to Google Maps
             search_url = f"https://www.google.com/maps/search/{query.replace(' ', '+')}"
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
-            await asyncio.sleep(3)  # Wait for Maps JS to initialize
+            await run_with_retries(
+                "google_maps.goto",
+                lambda: page.goto(
+                    search_url,
+                    wait_until="domcontentloaded",
+                    timeout=max(30000, int(settings.request_delay_seconds * 1000) * 30),
+                ),
+            )
+            await jitter_sleep(2.0, 3.5)  # Let Maps scripts load and hydrate UI.
 
             # Accept cookies if dialog appears
             try:
                 accept_btn = page.locator('button:has-text("Tout accepter")')
                 if await accept_btn.count() > 0:
                     await accept_btn.first.click()
-                    await asyncio.sleep(1)
+                    await jitter_sleep(0.5, 1.4)
             except Exception:
                 pass
 
@@ -80,7 +94,7 @@ class GoogleMapsScraper(BaseScraper):
                 feed = page.locator('[role="feed"]')
                 if await feed.count() > 0:
                     await feed.evaluate("el => el.scrollTop = el.scrollHeight")
-                    await asyncio.sleep(1.5)
+                    await jitter_sleep(1.0, 1.8)
 
                 scroll_attempts += 1
 
@@ -93,6 +107,7 @@ class GoogleMapsScraper(BaseScraper):
                     lead = await self._extract_lead_from_item(page, items.nth(i))
                     if lead:
                         leads.append(lead)
+                    await jitter_sleep(0.2, 0.8)
                 except Exception as e:
                     logger.warning(f"Failed to extract lead {i}: {e}")
                     continue
@@ -107,8 +122,12 @@ class GoogleMapsScraper(BaseScraper):
     async def _extract_lead_from_item(self, page: Page, item) -> ScrapedLead | None:
         """Click on a result item and extract business details."""
         try:
-            await item.click()
-            await asyncio.sleep(2)
+            await run_with_retries(
+                "google_maps.item_click",
+                lambda: item.click(timeout=10000),
+                retries=2,
+            )
+            await jitter_sleep(1.2, 2.4)
 
             # Extract business name
             name_el = page.locator("h1.DUwDvf")

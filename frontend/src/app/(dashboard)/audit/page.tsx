@@ -52,6 +52,7 @@ export default function AuditPage() {
     action: action || undefined,
     resource_type: resourceType || undefined,
   });
+  const extractionMetrics = summary?.extraction_metrics;
 
   const topActions = useMemo(
     () => (summary?.events_by_action ?? []).slice(0, 8),
@@ -114,6 +115,37 @@ export default function AuditPage() {
           value={`${sinceHours}h`}
           helper="Perimetre analyse"
           icon={<ShieldCheck className="h-4 w-4 text-success" />}
+        />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          label="Jobs extraction"
+          value={summaryLoading ? "..." : extractionMetrics?.total_jobs ?? 0}
+          helper={
+            summaryLoading
+              ? "..."
+              : `ok ${extractionMetrics?.completed_jobs ?? 0} / fail ${extractionMetrics?.failed_jobs ?? 0} / run ${extractionMetrics?.running_jobs ?? 0}`
+          }
+        />
+        <MetricCard
+          label="Taux succes"
+          value={summaryLoading ? "..." : `${extractionMetrics?.success_rate_pct ?? 0}%`}
+          helper="Jobs completes / total"
+        />
+        <MetricCard
+          label="Leads moyens"
+          value={summaryLoading ? "..." : extractionMetrics?.avg_leads_found ?? 0}
+          helper="Moyenne de leads par job complete"
+        />
+        <MetricCard
+          label="Filtres non-B2B"
+          value={summaryLoading ? "..." : extractionMetrics?.filtered_non_b2b_total ?? 0}
+          helper={
+            summaryLoading
+              ? "..."
+              : `Duree moyenne ${extractionMetrics?.avg_duration_seconds ?? 0}s`
+          }
         />
       </div>
 

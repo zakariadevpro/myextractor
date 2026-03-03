@@ -34,6 +34,19 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build fro
 - Frontend: `http://localhost:15173`
 - API: `http://localhost:18000/api/v1`
 
+## Durcissement scraping (proxy + B2B strict)
+
+Variables a ajouter dans `.env` pour les workers:
+
+```bash
+PROXY_POOL_URLS=http://user:pass@proxy1:port,http://user:pass@proxy2:port
+PROXY_ROTATION_ENABLED=true
+B2B_STRICT_MODE=true
+```
+
+- `PROXY_POOL_URLS`: pool de proxies, rotation round-robin.
+- `B2B_STRICT_MODE=true`: exclut les leads probablement particuliers.
+
 ## Raccourcis PowerShell (Windows)
 
 ```powershell

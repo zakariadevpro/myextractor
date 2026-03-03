@@ -85,6 +85,13 @@ services:
     environment:
       DATABASE_URL: postgresql://winaity:${DB_PASSWORD:-changeme}@postgres:5432/winaity
       REDIS_URL: redis://redis:6379/0
+      PROXY_POOL_URLS: ${PROXY_POOL_URLS:-}
+      PROXY_ROTATION_ENABLED: ${PROXY_ROTATION_ENABLED:-false}
+      B2B_STRICT_MODE: ${B2B_STRICT_MODE:-true}
+      CONTACT_PRO_EMAIL_BONUS: ${CONTACT_PRO_EMAIL_BONUS:-10}
+      CONTACT_EMAIL_WEBSITE_DOMAIN_MATCH_BONUS: ${CONTACT_EMAIL_WEBSITE_DOMAIN_MATCH_BONUS:-6}
+      CONTACT_MULTI_PHONE_BONUS: ${CONTACT_MULTI_PHONE_BONUS:-4}
+      CONTACT_FULL_PROFILE_BONUS: ${CONTACT_FULL_PROFILE_BONUS:-6}
     command: celery -A app.celery_app worker --loglevel=info --concurrency=2 -Q scraping,cleaning,scoring
 
   celery-beat:
