@@ -1,5 +1,5 @@
 import { ExtractionWorkspace } from "@/components/features/extraction/extraction-workspace";
 
-export default function ExtractionPage() {
-  return <ExtractionWorkspace mode="hub" />;
+export default function ExtractionB2BPage() {
+  return <ExtractionWorkspace mode="b2b" />;
 }
