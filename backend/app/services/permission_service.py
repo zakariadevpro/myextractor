@@ -6,15 +6,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestError, ForbiddenError
 from app.core.permission_catalog import (
+    get_preset_permissions,
     get_role_default_permissions,
     is_known_permission,
+    is_known_preset,
     list_permission_catalog,
+    list_permission_presets,
     normalize_permission_name,
+    normalize_preset_key,
     resolve_effective_permissions,
 )
 from app.models.user import User
 from app.models.user_permission import UserPermission
-from app.schemas.permission import PermissionCatalogItem, UserPermissionsResponse
+from app.schemas.permission import (
+    PermissionCatalogItem,
+    PermissionPresetItem,
+    UserPermissionsResponse,
+)
 
 
 class PermissionService:
@@ -130,6 +138,30 @@ class PermissionService:
     @staticmethod
     def get_permission_catalog() -> list[PermissionCatalogItem]:
         return [PermissionCatalogItem(**item) for item in list_permission_catalog()]
+
+    @staticmethod
+    def get_permission_presets() -> list[PermissionPresetItem]:
+        return [PermissionPresetItem(**item) for item in list_permission_presets()]
+
+    async def apply_permission_preset(
+        self, *, target_user: User, preset_key: str
+    ) -> UserPermissionsResponse:
+        normalized_key = normalize_preset_key(preset_key)
+        if not is_known_preset(normalized_key):
+            raise BadRequestError(f"Unknown preset '{preset_key}'")
+
+        desired_permissions = get_preset_permissions(normalized_key)
+        if desired_permissions is None:
+            raise BadRequestError(f"Unknown preset '{preset_key}'")
+
+        defaults = get_role_default_permissions(target_user.role)
+        grants = sorted(item for item in desired_permissions if item not in defaults)
+        revokes = sorted(item for item in defaults if item not in desired_permissions)
+        return await self.replace_user_permissions(
+            target_user=target_user,
+            grants=grants,
+            revokes=revokes,
+        )
 
     async def count_active_super_admins(self, organization_id: uuid.UUID) -> int:
         result = await self.db.execute(

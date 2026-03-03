@@ -15,6 +15,8 @@ from app.models.user import User
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.permission import (
     PermissionCatalogItem,
+    PermissionPresetItem,
+    UserPermissionsApplyPreset,
     UserPermissionsResponse,
     UserPermissionsUpdate,
 )
@@ -92,6 +94,16 @@ async def get_permission_catalog(
     return permission_service.get_permission_catalog()
 
 
+@router.get("/permissions/presets", response_model=list[PermissionPresetItem])
+async def get_permission_presets(
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    permission_service = PermissionService(db)
+    await permission_service.require_user_permission(current_user, "users.view")
+    return permission_service.get_permission_presets()
+
+
 @router.get("/{user_id}/permissions", response_model=UserPermissionsResponse)
 async def get_user_permissions(
     user_id: uuid.UUID,
@@ -154,6 +166,56 @@ async def update_user_permissions(
         resource_type="user",
         resource_id=str(target_user.id),
         details={"grants": snapshot.grants, "revokes": snapshot.revokes},
+    )
+    return snapshot
+
+
+@router.post("/{user_id}/permissions/apply-preset", response_model=UserPermissionsResponse)
+async def apply_user_permissions_preset(
+    user_id: uuid.UUID,
+    data: UserPermissionsApplyPreset,
+    current_user: User = Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    permission_service = PermissionService(db)
+    await permission_service.require_user_permission(current_user, "users.permissions.manage")
+
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.organization_id == current_user.organization_id)
+    )
+    target_user = result.scalar_one_or_none()
+    if not target_user:
+        raise NotFoundError("User not found")
+    if target_user.id == current_user.id:
+        raise BadRequestError("Cannot change your own permissions")
+
+    snapshot = await permission_service.apply_permission_preset(
+        target_user=target_user,
+        preset_key=data.preset_key,
+    )
+
+    if (
+        target_user.role == ROLE_SUPER_ADMIN
+        and "access.super_admin" not in snapshot.effective_permissions
+    ):
+        active_super_admins = await permission_service.count_active_super_admins(
+            current_user.organization_id
+        )
+        if active_super_admins <= 0:
+            raise BadRequestError(
+                "Cannot remove access.super_admin from the last active super admin"
+            )
+
+    await AuditLogService(db).log(
+        action="user.permissions_apply_preset",
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        resource_type="user",
+        resource_id=str(target_user.id),
+        details={
+            "preset_key": data.preset_key,
+            "effective_permissions": snapshot.effective_permissions,
+        },
     )
     return snapshot
 

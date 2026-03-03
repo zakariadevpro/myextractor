@@ -31,9 +31,11 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
 import {
+  useApplyPermissionPreset,
   useCreateUser,
   useDeactivateUser,
   usePermissionCatalog,
+  usePermissionPresets,
   useUpdateUser,
   useUpdateUserPermissions,
   useUserPermissions,
@@ -86,16 +88,19 @@ export default function TeamPage() {
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [permissionsTarget, setPermissionsTarget] = useState<User | null>(null);
   const [editedPermissions, setEditedPermissions] = useState<string[]>([]);
+  const [selectedPresetKey, setSelectedPresetKey] = useState("");
 
   const { data, isLoading } = useUsers({ page, page_size: 20 });
   const { data: currentSubscription } = useCurrentSubscription(canManageTeam);
   const { data: permissionCatalog } = usePermissionCatalog(canManagePermissions);
+  const { data: permissionPresets } = usePermissionPresets(canManagePermissions);
   const { data: permissionSnapshot, isLoading: permissionsLoading } = useUserPermissions(
     permissionsTarget?.id
   );
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const updateUserPermissions = useUpdateUserPermissions();
+  const applyPermissionPreset = useApplyPermissionPreset();
   const deactivateUser = useDeactivateUser();
   const members = useMemo(() => data?.items ?? [], [data?.items]);
   const totalPages = data?.total_pages ?? 1;
@@ -129,6 +134,12 @@ export default function TeamPage() {
       setEditedPermissions(permissionSnapshot.effective_permissions ?? []);
     }
   }, [permissionSnapshot]);
+
+  useEffect(() => {
+    if (!selectedPresetKey && (permissionPresets?.length ?? 0) > 0) {
+      setSelectedPresetKey(permissionPresets?.[0]?.key ?? "");
+    }
+  }, [permissionPresets, selectedPresetKey]);
 
   const handleInvite = async () => {
     if (seatLimitReached) {
@@ -198,6 +209,9 @@ export default function TeamPage() {
 
   const openPermissionsDialog = (member: User) => {
     setPermissionsTarget(member);
+    if ((permissionPresets?.length ?? 0) > 0) {
+      setSelectedPresetKey(permissionPresets?.[0]?.key ?? "");
+    }
     setPermissionsDialogOpen(true);
   };
 
@@ -232,6 +246,20 @@ export default function TeamPage() {
       setPermissionsTarget(null);
     } catch {
       toast.error("Impossible de mettre a jour les permissions.");
+    }
+  };
+
+  const handleApplyPreset = async () => {
+    if (!permissionsTarget || !selectedPresetKey) return;
+    try {
+      const snapshot = await applyPermissionPreset.mutateAsync({
+        userId: permissionsTarget.id,
+        presetKey: selectedPresetKey,
+      });
+      setEditedPermissions(snapshot.effective_permissions ?? []);
+      toast.success("Preset applique.");
+    } catch {
+      toast.error("Impossible d'appliquer le preset.");
     }
   };
 
@@ -543,6 +571,35 @@ export default function TeamPage() {
             <p className="text-sm text-muted-foreground">Chargement des permissions...</p>
           ) : (
             <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+              <div className="rounded-md border border-border p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="flex-1">
+                    <Select
+                      label="Preset rapide"
+                      value={selectedPresetKey}
+                      onChange={(e) => setSelectedPresetKey(e.target.value)}
+                      options={(permissionPresets ?? []).map((preset) => ({
+                        value: preset.key,
+                        label: preset.label,
+                      }))}
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={handleApplyPreset}
+                    isLoading={applyPermissionPreset.isPending}
+                    disabled={!selectedPresetKey}
+                  >
+                    Appliquer preset
+                  </Button>
+                </div>
+                {selectedPresetKey ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {(permissionPresets ?? []).find((preset) => preset.key === selectedPresetKey)
+                      ?.description ?? ""}
+                  </p>
+                ) : null}
+              </div>
               {Object.entries(permissionsByCategory).map(([category, items]) => (
                 <div key={category} className="rounded-md border border-border p-3">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">

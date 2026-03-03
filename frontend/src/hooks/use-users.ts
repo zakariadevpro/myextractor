@@ -5,6 +5,7 @@ import apiClient from "@/lib/api-client";
 import type { PaginatedResponse } from "@/types/api";
 import type {
   PermissionCatalogItem,
+  PermissionPresetItem,
   User,
   UserPermissionsSnapshot,
   UserRole,
@@ -110,6 +111,18 @@ export function useUserPermissions(userId?: string) {
   });
 }
 
+export function usePermissionPresets(enabled = true) {
+  return useQuery({
+    queryKey: ["users", "permissions", "presets"],
+    queryFn: async () => {
+      const response = await apiClient.get<PermissionPresetItem[]>("/users/permissions/presets");
+      return response.data;
+    },
+    enabled,
+    placeholderData: [],
+  });
+}
+
 export function useUpdateUserPermissions() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -126,6 +139,25 @@ export function useUpdateUserPermissions() {
         grants,
         revokes,
       });
+      return response.data;
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["users", "permissions", variables.userId] });
+    },
+  });
+}
+
+export function useApplyPermissionPreset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, presetKey }: { userId: string; presetKey: string }) => {
+      const response = await apiClient.post<UserPermissionsSnapshot>(
+        `/users/${userId}/permissions/apply-preset`,
+        {
+          preset_key: presetKey,
+        }
+      );
       return response.data;
     },
     onSuccess: (_data, variables) => {

@@ -60,6 +60,13 @@ export interface PermissionCatalogItem {
   category: string;
 }
 
+export interface PermissionPresetItem {
+  key: string;
+  label: string;
+  description: string;
+  permissions: string[];
+}
+
 export interface UserPermissionsSnapshot {
   user_id: string;
   role: UserRole;

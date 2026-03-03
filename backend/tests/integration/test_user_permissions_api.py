@@ -123,3 +123,67 @@ async def test_revoke_access_admin_blocks_admin_endpoints(client, db_session, te
         },
     )
     assert create_attempt.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_super_admin_can_apply_permission_preset(client, db_session, test_org, test_user):
+    test_user.role = "super_admin"
+    await db_session.flush()
+    await _activate_plan_for_org(db_session, test_org.id, max_users=4)
+    super_headers = _headers_for_user(test_user)
+
+    created = await client.post(
+        "/api/v1/users",
+        headers=super_headers,
+        json={
+            "email": "preset.target@example.com",
+            "first_name": "Preset",
+            "last_name": "Target",
+            "role": "user",
+        },
+    )
+    assert created.status_code == 200
+    target_id = created.json()["id"]
+
+    presets = await client.get("/api/v1/users/permissions/presets", headers=super_headers)
+    assert presets.status_code == 200
+    keys = [item["key"] for item in presets.json()]
+    assert "extractor_operator" in keys
+
+    applied = await client.post(
+        f"/api/v1/users/{target_id}/permissions/apply-preset",
+        headers=super_headers,
+        json={"preset_key": "admin_ops"},
+    )
+    assert applied.status_code == 200
+    body = applied.json()
+    assert "access.admin" in body["effective_permissions"]
+    assert "users.permissions.manage" not in body["effective_permissions"]
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_apply_permission_preset(client, db_session, test_org, test_user):
+    test_user.role = "admin"
+    await db_session.flush()
+    await _activate_plan_for_org(db_session, test_org.id, max_users=4)
+    admin_headers = _headers_for_user(test_user)
+
+    created = await client.post(
+        "/api/v1/users",
+        headers=admin_headers,
+        json={
+            "email": "preset.denied@example.com",
+            "first_name": "Preset",
+            "last_name": "Denied",
+            "role": "user",
+        },
+    )
+    assert created.status_code == 200
+    target_id = created.json()["id"]
+
+    denied = await client.post(
+        f"/api/v1/users/{target_id}/permissions/apply-preset",
+        headers=admin_headers,
+        json={"preset_key": "view_only"},
+    )
+    assert denied.status_code == 403

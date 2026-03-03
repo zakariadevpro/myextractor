@@ -12,6 +12,13 @@ class PermissionCatalogItem(BaseModel):
     category: str
 
 
+class PermissionPresetItem(BaseModel):
+    key: str
+    label: str
+    description: str
+    permissions: list[str]
+
+
 class UserPermissionsUpdate(BaseModel):
     grants: list[str] = Field(default_factory=list)
     revokes: list[str] = Field(default_factory=list)
@@ -27,6 +34,15 @@ class UserPermissionsUpdate(BaseModel):
             raise ValueError(f"Unknown permissions: {', '.join(unknown)}")
         self.grants = sorted(grants)
         self.revokes = sorted(revokes)
+        return self
+
+
+class UserPermissionsApplyPreset(BaseModel):
+    preset_key: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def normalize_key(self):
+        self.preset_key = str(self.preset_key or "").strip().lower()
         return self
 
 
