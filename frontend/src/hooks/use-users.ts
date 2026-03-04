@@ -111,6 +111,30 @@ export function useUserPermissions(userId?: string) {
   });
 }
 
+export function useUsersPermissionsMatrix(userIds: string[], enabled = true) {
+  const stableIds = [...userIds].sort();
+  return useQuery({
+    queryKey: ["users", "permissions", "matrix", stableIds],
+    queryFn: async () => {
+      const snapshots = await Promise.all(
+        stableIds.map(async (userId) => {
+          const response = await apiClient.get<UserPermissionsSnapshot>(`/users/${userId}/permissions`);
+          return response.data;
+        })
+      );
+      return snapshots.reduce(
+        (acc, snapshot) => {
+          acc[snapshot.user_id] = snapshot;
+          return acc;
+        },
+        {} as Record<string, UserPermissionsSnapshot>
+      );
+    },
+    enabled: enabled && stableIds.length > 0,
+    placeholderData: {},
+  });
+}
+
 export function usePermissionPresets(enabled = true) {
   return useQuery({
     queryKey: ["users", "permissions", "presets"],

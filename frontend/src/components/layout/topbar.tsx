@@ -21,6 +21,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
     extraction: "Extraction",
     settings: "Parametres",
     team: "Equipe",
+    "permissions-matrix": "Matrice Permissions",
     billing: "Facturation",
     audit: "Audit",
   };

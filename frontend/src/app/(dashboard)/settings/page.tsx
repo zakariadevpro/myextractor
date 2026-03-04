@@ -14,6 +14,7 @@ import {
   BrainCircuit,
   Users as UsersIcon,
   Save,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +90,12 @@ export default function SettingsPage() {
       href: "/settings/team",
       icon: UsersIcon,
       description: "Gerez les membres de votre equipe",
+    },
+    {
+      label: "Matrice Permissions",
+      href: "/settings/permissions-matrix",
+      icon: ShieldCheck,
+      description: "Vue globale et actions en lot sur les permissions",
     },
     {
       label: "API Keys",

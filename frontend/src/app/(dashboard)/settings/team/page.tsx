@@ -7,6 +7,7 @@ import {
   Copy,
   KeyRound,
   Mail,
+  ShieldCheck,
   SlidersHorizontal,
   ShieldAlert,
   Shield,
@@ -286,6 +287,14 @@ export default function TeamPage() {
                 Retour Parametres
               </Button>
             </Link>
+            {canManagePermissions ? (
+              <Link href="/settings/permissions-matrix">
+                <Button variant="outline" className="gap-2">
+                  <ShieldCheck className="h-4 w-4" />
+                  Matrice Permissions
+                </Button>
+              </Link>
+            ) : null}
             {canManageTeam ? (
               <Button
                 className="gap-2"
