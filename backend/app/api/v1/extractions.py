@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_manager, get_current_user
+from app.api.deps import get_current_user
 from app.core.exceptions import BadRequestError, NotFoundError
 from app.db.session import get_db
 from app.models.extraction import ExtractionJob
@@ -13,6 +13,7 @@ from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.extraction import ExtractionCreate, ExtractionResponse
 from app.services.audit_log_service import AuditLogService
 from app.services.extraction_service import ExtractionService
+from app.services.permission_service import PermissionService
 
 router = APIRouter(prefix="/extractions", tags=["extractions"])
 
@@ -26,9 +27,10 @@ ALLOWED_EXTRACTION_SORT_COLUMNS = {
 @router.post("", response_model=ExtractionResponse)
 async def create_extraction(
     data: ExtractionCreate,
-    current_user: User = Depends(get_current_manager),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await PermissionService(db).require_user_permission(current_user, "extraction.create")
     service = ExtractionService(db)
     job = await service.create_job(data, current_user)
     await AuditLogService(db).log(
@@ -56,6 +58,7 @@ async def list_extractions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await PermissionService(db).require_user_permission(current_user, "extraction.view")
     offset = (page - 1) * page_size
     base_query = select(ExtractionJob).where(
         ExtractionJob.organization_id == current_user.organization_id
@@ -92,6 +95,7 @@ async def get_extraction(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await PermissionService(db).require_user_permission(current_user, "extraction.view")
     result = await db.execute(
         select(ExtractionJob).where(
             ExtractionJob.id == job_id,
@@ -107,9 +111,10 @@ async def get_extraction(
 @router.post("/{job_id}/cancel", response_model=MessageResponse)
 async def cancel_extraction(
     job_id: uuid.UUID,
-    current_user: User = Depends(get_current_manager),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await PermissionService(db).require_user_permission(current_user, "extraction.cancel")
     result = await db.execute(
         select(ExtractionJob).where(
             ExtractionJob.id == job_id,

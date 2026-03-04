@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from app.config import settings
 from app.core.security import create_access_token
 from app.models.subscription import Plan, Subscription
 
@@ -187,3 +188,86 @@ async def test_admin_cannot_apply_permission_preset(client, db_session, test_org
         json={"preset_key": "view_only"},
     )
     assert denied.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_user_without_leads_view_cannot_list_leads(client, db_session, test_org, test_user):
+    test_user.role = "super_admin"
+    await db_session.flush()
+    await _activate_plan_for_org(db_session, test_org.id, max_users=4)
+    super_headers = _headers_for_user(test_user)
+
+    created = await client.post(
+        "/api/v1/users",
+        headers=super_headers,
+        json={
+            "email": "no.view@example.com",
+            "first_name": "No",
+            "last_name": "View",
+            "role": "user",
+        },
+    )
+    assert created.status_code == 200
+    target_id = created.json()["id"]
+
+    revoked = await client.put(
+        f"/api/v1/users/{target_id}/permissions",
+        headers=super_headers,
+        json={"grants": [], "revokes": ["leads.view"]},
+    )
+    assert revoked.status_code == 200
+
+    target_headers = _headers_for_identity(target_id, str(test_org.id), "user")
+    denied = await client.get("/api/v1/leads", headers=target_headers)
+    assert denied.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_b2c_preset_allows_b2c_intake(client, db_session, test_org, test_user, monkeypatch):
+    monkeypatch.setattr(settings, "b2c_mode_enabled", True)
+    test_user.role = "super_admin"
+    await db_session.flush()
+    await _activate_plan_for_org(db_session, test_org.id, max_users=4)
+    super_headers = _headers_for_user(test_user)
+
+    created = await client.post(
+        "/api/v1/users",
+        headers=super_headers,
+        json={
+            "email": "b2c.operator@example.com",
+            "first_name": "B2C",
+            "last_name": "Operator",
+            "role": "user",
+        },
+    )
+    assert created.status_code == 200
+    target_id = created.json()["id"]
+
+    applied = await client.post(
+        f"/api/v1/users/{target_id}/permissions/apply-preset",
+        headers=super_headers,
+        json={"preset_key": "b2c_consent_operator"},
+    )
+    assert applied.status_code == 200
+    assert "b2c.intake" in applied.json()["effective_permissions"]
+
+    target_headers = _headers_for_identity(target_id, str(test_org.id), "user")
+    intake = await client.post(
+        "/api/v1/leads/b2c/intake",
+        headers=target_headers,
+        json={
+            "full_name": "Lead B2C",
+            "email": "lead.b2c@example.com",
+            "phone": "+33611111111",
+            "city": "Paris",
+            "consent_source": "web_form",
+            "consent_at": "2026-03-01T10:00:00Z",
+            "consent_text_version": "v1.0",
+            "consent_proof_ref": "proof-b2c-operator-001",
+            "privacy_policy_version": "pp-2026-01",
+            "purpose": "prospection_commerciale",
+            "double_opt_in": False,
+        },
+    )
+    assert intake.status_code == 200
+    assert intake.json()["lead_kind"] == "b2c"

@@ -12,7 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_current_manager, get_current_user
+from app.api.deps import get_current_user
 from app.config import settings
 from app.core.exceptions import BadRequestError, NotFoundError
 from app.db.session import get_db
@@ -31,6 +31,7 @@ from app.schemas.lead import (
 from app.schemas.lead_consent import LeadConsentResponse, LeadConsentUpdate
 from app.services.audit_log_service import AuditLogService
 from app.services.b2c_intake_service import B2CIntakeService
+from app.services.permission_service import PermissionService
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -240,6 +241,14 @@ async def _build_consent_response(db: AsyncSession, consent_id: uuid.UUID) -> Le
     )
 
 
+async def _require_permission(
+    db: AsyncSession,
+    current_user: User,
+    permission: str,
+) -> None:
+    await PermissionService(db).require_user_permission(current_user, permission)
+
+
 @router.get("", response_model=PaginatedResponse[LeadResponse])
 async def list_leads(
     page: int = Query(1, ge=1),
@@ -263,6 +272,7 @@ async def list_leads(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "leads.view")
     if ordering:
         sort_order = "desc" if ordering.startswith("-") else "asc"
         sort_by = ordering.lstrip("-")
@@ -325,9 +335,10 @@ async def export_leads_csv(
     city: str | None = None,
     lead_kind: Literal["b2b", "b2c"] | None = None,
     consent_granted_only: bool | None = None,
-    current_user: User = Depends(get_current_manager),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "leads.export")
     filters = LeadFilters(
         min_score=min_score,
         sector=sector,
@@ -433,9 +444,10 @@ async def export_leads_xlsx(
     city: str | None = None,
     lead_kind: Literal["b2b", "b2c"] | None = None,
     consent_granted_only: bool | None = None,
-    current_user: User = Depends(get_current_manager),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "leads.export")
     filters = LeadFilters(
         min_score=min_score,
         sector=sector,
@@ -544,6 +556,7 @@ async def get_suggested_segments(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "leads.view")
     org_id = current_user.organization_id
     has_contact = or_(Lead.emails.any(), Lead.phones.any())
 
@@ -633,9 +646,10 @@ async def get_suggested_segments(
 @router.post("/b2c/intake", response_model=LeadResponse)
 async def intake_b2c_lead(
     data: B2CLeadIntakeCreate,
-    current_user: User = Depends(get_current_manager),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "b2c.intake")
     if not settings.b2c_mode_enabled:
         raise BadRequestError("B2C mode is disabled on this environment")
     lead = await B2CIntakeService(db).intake_for_org(
@@ -653,9 +667,10 @@ async def intake_b2c_csv(
     file: UploadFile = File(...),
     mapping: str = Form(...),
     defaults: str | None = Form(default=None),
-    current_user: User = Depends(get_current_manager),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "b2c.intake")
     if not settings.b2c_mode_enabled:
         raise BadRequestError("B2C mode is disabled on this environment")
     if not file.filename or not file.filename.lower().endswith(".csv"):
@@ -878,6 +893,7 @@ async def get_lead_consent(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "leads.view")
     lead = await _get_lead_in_org(db, lead_id, current_user.organization_id)
     consent = await _get_or_create_consent(db, lead)
     return await _build_consent_response(db, consent.id)
@@ -887,9 +903,10 @@ async def get_lead_consent(
 async def update_lead_consent(
     lead_id: uuid.UUID,
     data: LeadConsentUpdate,
-    current_user: User = Depends(get_current_manager),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "b2c.consent.manage")
     lead = await _get_lead_in_org(db, lead_id, current_user.organization_id)
     consent = await _get_or_create_consent(db, lead)
     old_state = {
@@ -935,6 +952,7 @@ async def get_lead(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "leads.view")
     result = await db.execute(
         select(Lead)
         .options(selectinload(Lead.emails), selectinload(Lead.phones), selectinload(Lead.consent))
@@ -953,6 +971,7 @@ async def update_lead(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "leads.manage")
     result = await db.execute(
         select(Lead)
         .options(selectinload(Lead.emails), selectinload(Lead.phones), selectinload(Lead.consent))
@@ -972,9 +991,10 @@ async def update_lead(
 @router.delete("/{lead_id}", response_model=MessageResponse)
 async def delete_lead(
     lead_id: uuid.UUID,
-    current_user: User = Depends(get_current_manager),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "leads.manage")
     result = await db.execute(
         select(Lead).where(Lead.id == lead_id, Lead.organization_id == current_user.organization_id)
     )
@@ -999,9 +1019,10 @@ async def delete_lead(
 
 @router.post("/deduplicate", response_model=MessageResponse)
 async def deduplicate_leads(
-    current_user: User = Depends(get_current_manager),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    await _require_permission(db, current_user, "leads.manage")
     from app.services.cleaning_service import CleaningService
 
     service = CleaningService(db)
