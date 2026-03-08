@@ -1,0 +1,111 @@
+services:
+  # ─── Databases ───────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: winaity
+      POSTGRES_USER: winaity
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U winaity"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-16379}:6379"
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── Application ─────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    ports:
+      - "${BACKEND_PORT:-18000}:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://winaity:${DB_PASSWORD:-changeme}@postgres:5432/winaity
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-key-change-me}
+      APP_ENV: development
+      DEBUG: "true"
+      WATCHFILES_FORCE_POLLING: "true"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-15173}:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:18000/api/v1}
+      NODE_OPTIONS: --max-old-space-size=512
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_ENV: production
+    command: sh -lc "npm run build && npm run start -- -p 5173"
+
+  # ─── Workers ─────────────────────────────────────────
+  celery-worker:
+    build:
+      context: .
+      dockerfile: docker/workers/Dockerfile
+    volumes:
+      - ./workers:/app
+      - ./backend:/backend
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://winaity:${DB_PASSWORD:-changeme}@postgres:5432/winaity
+      REDIS_URL: redis://redis:6379/0
+      PROXY_POOL_URLS: ${PROXY_POOL_URLS:-}
+      PROXY_ROTATION_ENABLED: ${PROXY_ROTATION_ENABLED:-false}
+      B2B_STRICT_MODE: ${B2B_STRICT_MODE:-true}
+      CONTACT_PRO_EMAIL_BONUS: ${CONTACT_PRO_EMAIL_BONUS:-10}
+      CONTACT_EMAIL_WEBSITE_DOMAIN_MATCH_BONUS: ${CONTACT_EMAIL_WEBSITE_DOMAIN_MATCH_BONUS:-6}
+      CONTACT_MULTI_PHONE_BONUS: ${CONTACT_MULTI_PHONE_BONUS:-4}
+      CONTACT_FULL_PROFILE_BONUS: ${CONTACT_FULL_PROFILE_BONUS:-6}
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2 -Q scraping,cleaning,scoring
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: docker/workers/Dockerfile
+    volumes:
+      - ./workers:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    command: celery -A app.celery_app beat --loglevel=info
+
+volumes:
+  postgres_data:

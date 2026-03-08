@@ -1,0 +1,51 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths: [backend/**]
+  pull_request:
+    branches: [main]
+    paths: [backend/**]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: winaity_test
+          POSTGRES_USER: winaity
+          POSTGRES_PASSWORD: testpass
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        working-directory: backend
+        run: |
+          ruff check app/
+          ruff format --check app/
+
+      - name: Test
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://winaity:testpass@localhost:5432/winaity_test
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET_KEY: test-secret
+        run: pytest -v

@@ -1,0 +1,8 @@
+services:
+  frontend:
+    environment:
+      NODE_ENV: development
+      NODE_OPTIONS: --max-old-space-size=2048
+      NEXT_TELEMETRY_DISABLED: "1"
+    command: npm run dev -- -p 5173
+

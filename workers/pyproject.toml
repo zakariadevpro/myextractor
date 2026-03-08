@@ -1,0 +1,33 @@
+[project]
+name = "winaity-extractor-workers"
+version = "0.1.0"
+description = "Winaity Extractor - Scraping Workers"
+requires-python = ">=3.12"
+dependencies = [
+    "celery[redis]>=5.4,<6.0",
+    "playwright>=1.49,<2.0",
+    "beautifulsoup4>=4.12,<5.0",
+    "lxml>=5.3,<6.0",
+    "fake-useragent>=1.5,<2.0",
+    "sqlalchemy>=2.0,<3.0",
+    "psycopg2-binary>=2.9,<3.0",
+    "httpx>=0.28,<1.0",
+    "tenacity>=9.0,<10.0",
+    "phonenumbers>=8.13,<9.0",
+    "pydantic>=2.10,<3.0",
+    "pydantic-settings>=2.7,<3.0",
+    "redis>=5.2,<6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9.0",
+    "ruff>=0.8,<1.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
