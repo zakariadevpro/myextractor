@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WinXtract Scheduler</title>
+    <link rel="stylesheet" href="{{ static_url('style.css') }}" />
+    <link rel="icon" type="image/svg+xml" href="{{ static_url('logo-winxtract-mark.svg') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <a class="brand-badge" href="/">
+          <img class="brand-logo" src="{{ static_url('logo-winxtract-mark.svg') }}" alt="WinXtract logo" />
+          <span class="brand-word">WinXtract</span>
+        </a>
+        <h1>Scheduler</h1>
+        <p>Planification automatique Run + Export.</p>
+        <nav class="top-nav">
+          <a href="/">Dashboard</a>
+          <a href="/onboarding">Onboarding</a>
+          <a href="/operations">Operations</a>
+          <a href="/exports">Exports</a>
+          <a href="/sources">Sources</a>
+          <a href="/leads">Leads</a>
+          <a href="/quality">Qualite</a>
+          <a href="/source-health">Source Health</a>
+          <a class="is-active" href="/scheduler">Scheduler</a>
+          <a href="/tasks">Taches</a>
+          <a href="/dead-letters">Dead Letters</a>
+          <a href="/errors">Logs erreurs</a>
+        </nav>
+      </header>
+
+      {% if request.query_params.get("msg") %}
+      <section class="notice">{{ request.query_params.get("msg") }}</section>
+      {% endif %}
+
+      <section class="panel">
+        <h2>Creer ou modifier un schedule</h2>
+        <form method="post" action="/scheduler/save">
+          <label for="source_slug">Source</label>
+          <select id="source_slug" name="source_slug">
+            {% for source in source_entries %}
+            <option value="{{ source.slug }}">{{ source.name }} ({{ source.slug }})</option>
+            {% endfor %}
+          </select>
+
+          <label for="interval_minutes">Intervalle (minutes)</label>
+          <input id="interval_minutes" name="interval_minutes" type="number" min="1" value="60" />
+
+          <label for="export_format">Format export</label>
+          <select id="export_format" name="export_format">
+            <option value="csv">CSV</option>
+            <option value="json">JSON</option>
+            <option value="xlsx">XLSX</option>
+          </select>
+
+          <label for="min_score">Score minimum</label>
+          <input id="min_score" name="min_score" type="number" min="0" max="100" value="0" />
+
+          <label for="enabled">Enabled</label>
+          <select id="enabled" name="enabled">
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+          <button type="submit">Enregistrer</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Schedules</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Enabled</th>
+                <th>Intervalle</th>
+                <th>Format</th>
+                <th>Score min</th>
+                <th>Toggle</th>
+                <th>Trigger now</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in schedules %}
+              <tr>
+                <td>{{ source_labels.get(item.source_slug, item.source_slug) }}</td>
+                <td>
+                  <span class="status-pill {% if item.enabled %}status-success{% else %}status-disabled{% endif %}">
+                    {% if item.enabled %}Actif{% else %}Inactif{% endif %}
+                  </span>
+                </td>
+                <td>{{ item.interval_minutes }} min</td>
+                <td>{{ item.export_format }}</td>
+                <td>{{ item.min_score }}</td>
+                <td>
+                  <form method="post" action="/scheduler/toggle" class="inline-form">
+                    <input type="hidden" name="source_slug" value="{{ item.source_slug }}" />
+                    <input type="hidden" name="enabled" value="{% if item.enabled %}false{% else %}true{% endif %}" />
+                    <button type="submit" class="{% if item.enabled %}btn-warn{% else %}btn-ok{% endif %}">
+                      {% if item.enabled %}Desactiver{% else %}Activer{% endif %}
+                    </button>
+                  </form>
+                </td>
+                <td>
+                  <form method="post" action="/scheduler/trigger" class="inline-form">
+                    <input type="hidden" name="source_slug" value="{{ item.source_slug }}" />
+                    <button type="submit" class="btn-combo">Run+Export</button>
+                  </form>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="7">Aucun schedule.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+
+
+
+
+

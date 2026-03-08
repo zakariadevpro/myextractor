@@ -1,0 +1,127 @@
+catalog:
+- slug: annuaire.118000.fr
+  label: annuaire.118000.fr
+  family: annuaire_public
+  status: stable
+  yaml: config/sources/annuaire_118000_public.yaml
+  note: Annuaire public, actif et valide.
+- slug: recherche_entreprises_fr_b2c
+  label: recherche-entreprises.api.gouv.fr (France entiere)
+  family: api_publique
+  status: stable
+  yaml: config/sources/recherche_entreprises_public.yaml
+  note: API gouvernementale, ouverte sans login, mode multi-villes France.
+- slug: opendata_paris_commerces_semaest
+  label: opendata.paris.fr commerces
+  family: open_data
+  status: stable
+  yaml: config/sources/opendata_paris_commerces_semaest.yaml
+  note: Open data metier commerces.
+- slug: opendata_bordeaux_etablissements
+  label: opendata.bordeaux-metropole.fr etablissements
+  family: open_data
+  status: stable
+  yaml: config/sources/opendata_bordeaux_etablissements.yaml
+  note: Open data etablissements.
+- slug: opendata_rennes_commerces
+  label: data.rennesmetropole.fr commerces
+  family: open_data
+  status: stable
+  yaml: config/sources/opendata_rennes_commerces.yaml
+  note: Open data commerces.
+- slug: opendata_idf_professionnels_sante
+  label: data.iledefrance.fr professionnels sante
+  family: open_data
+  status: stable
+  yaml: config/sources/opendata_idf_professionnels_sante.yaml
+  note: Open data regional.
+- slug: opendata_strasbourg_commerces
+  label: data.strasbourg.eu commerces
+  family: open_data
+  status: stable
+  yaml: config/sources/opendata_strasbourg_commerces.yaml
+  note: Open data commerces.
+- slug: opendata_angers_associations
+  label: data.angers.fr associations
+  family: open_data
+  status: stable
+  yaml: config/sources/opendata_angers_associations.yaml
+  note: Open data annuaire associations.
+- slug: data_gouv_annuaire_commercants_sucy
+  label: data.gouv.fr commercants sucy
+  family: data_gouv
+  status: stable
+  yaml: config/sources/data_gouv_annuaire_commercants_sucy.yaml
+  note: Dataset public data.gouv.fr.
+- slug: data_gouv_ameli_centres_sante
+  label: data.gouv.fr annuaire sante ameli
+  family: data_gouv
+  status: stable
+  yaml: config/sources/data_gouv_ameli_centres_sante.yaml
+  note: Dataset public data.gouv.fr.
+- slug: arcep_points_mutualisation
+  label: ARCEP points de mutualisation
+  family: data_gouv
+  status: stable
+  yaml: config/sources/data_gouv_arcep_points_mutualisation.yaml
+  note: Pack ARCEP actif.
+- slug: overpass_osm_paris_shops
+  label: OpenStreetMap Overpass shops France metros
+  family: open_data
+  status: stable
+  yaml: config/sources/overpass_osm_paris_shops.yaml
+  note: Source open data geographique multi-metropoles.
+- slug: recherche_entreprises_boulangerie_lyon
+  label: recherche-entreprises boulangerie lyon
+  family: api_publique
+  status: candidate
+  yaml: config/sources/recherche_entreprises_boulangerie_lyon.yaml
+  note: Candidat public, desactive par defaut.
+- slug: recherche_entreprises_coiffure_marseille
+  label: recherche-entreprises coiffure marseille
+  family: api_publique
+  status: candidate
+  yaml: config/sources/recherche_entreprises_coiffure_marseille.yaml
+  note: Candidat public, desactive par defaut.
+- slug: recherche_entreprises_restaurants_lille
+  label: recherche-entreprises restaurants lille
+  family: api_publique
+  status: candidate
+  yaml: config/sources/recherche_entreprises_restaurants_lille.yaml
+  note: Candidat public, desactive par defaut.
+- slug: recherche_entreprises_garages_nice
+  label: recherche-entreprises garages nice
+  family: api_publique
+  status: candidate
+  yaml: config/sources/recherche_entreprises_garages_nice.yaml
+  note: Candidat public, desactive par defaut.
+- slug: recherche_entreprises_dentistes_toulouse
+  label: recherche-entreprises dentistes toulouse
+  family: api_publique
+  status: candidate
+  yaml: config/sources/recherche_entreprises_dentistes_toulouse.yaml
+  note: Candidat public, desactive par defaut.
+- slug: recherche_entreprises_pharmacies_nantes
+  label: recherche-entreprises pharmacies nantes
+  family: api_publique
+  status: candidate
+  yaml: config/sources/recherche_entreprises_pharmacies_nantes.yaml
+  note: Candidat public, desactive par defaut.
+- slug: overpass_osm_lyon_shops
+  label: OpenStreetMap Overpass shops Lyon
+  family: open_data
+  status: candidate
+  yaml: config/sources/overpass_osm_lyon_shops.yaml
+  note: Candidat open data geographique, desactive par defaut.
+- slug: overpass_osm_marseille_shops
+  label: OpenStreetMap Overpass shops Marseille
+  family: open_data
+  status: candidate
+  yaml: config/sources/overpass_osm_marseille_shops.yaml
+  note: Candidat open data geographique, desactive par defaut.
+- slug: pages_blanches_seed
+  label: pagesjaunes.fr/pagesblanches (France seed)
+  family: annuaire_public
+  status: candidate
+  yaml: config/sources/pages_blanches_public.yaml
+  note: Source particuliers publique, desactivee par defaut (anti-bot/CGU selon environnement).

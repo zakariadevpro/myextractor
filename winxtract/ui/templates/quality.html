@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WinXtract Qualite</title>
+    <link rel="stylesheet" href="{{ static_url('style.css') }}" />
+    <link rel="icon" type="image/svg+xml" href="{{ static_url('logo-winxtract-mark.svg') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <a class="brand-badge" href="/">
+          <img class="brand-logo" src="{{ static_url('logo-winxtract-mark.svg') }}" alt="WinXtract logo" />
+          <span class="brand-word">WinXtract</span>
+        </a>
+        <h1>Qualite des leads</h1>
+        <p>Couverture des contacts et score moyen par source.</p>
+        <nav class="top-nav">
+          <a href="/">Dashboard</a>
+          <a href="/onboarding">Onboarding</a>
+          <a href="/operations">Operations</a>
+          <a href="/exports">Exports</a>
+          <a href="/sources">Sources</a>
+          <a href="/leads">Leads</a>
+          <a class="is-active" href="/quality">Qualite</a>
+          <a href="/source-health">Source Health</a>
+          <a href="/scheduler">Scheduler</a>
+          <a href="/tasks">Taches</a>
+          <a href="/dead-letters">Dead Letters</a>
+          <a href="/errors">Logs erreurs</a>
+        </nav>
+      </header>
+
+      <section class="panel">
+        <form method="get" action="/quality">
+          <label for="source_slug">Source (optionnel)</label>
+          <select id="source_slug" name="source_slug">
+            <option value="">Toutes</option>
+            {% for source in source_entries %}
+            <option value="{{ source.slug }}" {% if source_slug == source.slug %}selected{% endif %}>{{ source.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Actualiser</button>
+        </form>
+      </section>
+
+      <section class="kpi-grid">
+        <article class="kpi"><span class="label">Leads</span><strong>{{ report.total_leads }}</strong></article>
+        <article class="kpi"><span class="label">Score moyen</span><strong>{{ report.avg_score }}</strong></article>
+        <article class="kpi"><span class="label">Avec email</span><strong>{{ report.with_email }}</strong></article>
+        <article class="kpi"><span class="label">Avec telephone</span><strong>{{ report.with_phone }}</strong></article>
+        <article class="kpi"><span class="label">Avec website</span><strong>{{ report.with_website }}</strong></article>
+        <article class="kpi"><span class="label">Avec ville</span><strong>{{ report.with_city }}</strong></article>
+      </section>
+
+      <section class="panel">
+        <h2>Ratios de couverture</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>Ratio</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Email</td><td>{{ report.coverage.email_ratio }}</td></tr>
+              <tr><td>Telephone</td><td>{{ report.coverage.phone_ratio }}</td></tr>
+              <tr><td>Website</td><td>{{ report.coverage.website_ratio }}</td></tr>
+              <tr><td>Ville</td><td>{{ report.coverage.city_ratio }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Top villes</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Ville</th><th>Count</th></tr></thead>
+            <tbody>
+              {% for row in report.top_cities %}
+              <tr><td>{{ row.city }}</td><td>{{ row.count }}</td></tr>
+              {% else %}
+              <tr><td colspan="2">Aucune donnee</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Repartition par source</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Source</th><th>Count</th><th>Avg score</th></tr></thead>
+            <tbody>
+              {% for row in report.by_source %}
+              <tr><td>{{ source_labels.get(row.source_slug, row.source_slug) }}</td><td>{{ row.count }}</td><td>{{ row.avg_score }}</td></tr>
+              {% else %}
+              <tr><td colspan="3">Aucune donnee</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+
+
+
+
+

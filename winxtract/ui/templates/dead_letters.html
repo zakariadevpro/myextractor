@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WinXtract Dead Letters</title>
+    <link rel="stylesheet" href="{{ static_url('style.css') }}" />
+    <link rel="icon" type="image/svg+xml" href="{{ static_url('logo-winxtract-mark.svg') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <a class="brand-badge" href="/">
+          <img class="brand-logo" src="{{ static_url('logo-winxtract-mark.svg') }}" alt="WinXtract logo" />
+          <span class="brand-word">WinXtract</span>
+        </a>
+        <h1>Dead Letters</h1>
+        <p>Taches terminales a relancer manuellement.</p>
+        <nav class="top-nav">
+          <a href="/">Dashboard</a>
+          <a href="/onboarding">Onboarding</a>
+          <a href="/operations">Operations</a>
+          <a href="/exports">Exports</a>
+          <a href="/sources">Sources</a>
+          <a href="/leads">Leads</a>
+          <a href="/quality">Qualite</a>
+          <a href="/source-health">Source Health</a>
+          <a href="/scheduler">Scheduler</a>
+          <a href="/tasks">Taches</a>
+          <a class="is-active" href="/dead-letters">Dead Letters</a>
+          <a href="/errors">Logs erreurs</a>
+        </nav>
+      </header>
+
+      <section class="notice">Task backend actif: {{ task_backend }}</section>
+      {% if msg %}
+      <section class="notice">{{ msg }}</section>
+      {% endif %}
+
+      <section class="panel">
+        <h2>Historique dead-letter</h2>
+        {% if task_backend != "db_queue" %}
+        <p class="muted">Disponible uniquement en backend `db_queue`.</p>
+        {% else %}
+        <form method="get" action="/dead-letters">
+          <label>Status</label>
+          <select name="status">
+            <option value="all" {% if filters.status == "all" %}selected{% endif %}>all</option>
+            <option value="dead" {% if filters.status == "dead" %}selected{% endif %}>dead</option>
+            <option value="failed" {% if filters.status == "failed" %}selected{% endif %}>failed</option>
+          </select>
+          <label>Type contient</label>
+          <input type="text" name="task_type" value="{{ filters.task_type }}" placeholder="run_export" />
+          <label>Source slug</label>
+          <input type="text" name="source_slug" value="{{ filters.source_slug }}" placeholder="annuaire.118000.fr" />
+          <label>Message contient</label>
+          <input type="text" name="message_contains" value="{{ filters.message_contains }}" placeholder="captcha" />
+          <label>Limit</label>
+          <input type="number" name="limit" min="1" max="500" value="{{ filters.limit }}" />
+          <button type="submit">Filtrer</button>
+        </form>
+        <form method="post" action="/tasks/requeue-batch">
+          <input type="hidden" name="status" value="{{ filters.status }}" />
+          <input type="hidden" name="task_type" value="{{ filters.task_type }}" />
+          <input type="hidden" name="source_slug" value="{{ filters.source_slug }}" />
+          <input type="hidden" name="message_contains" value="{{ filters.message_contains }}" />
+          <input type="hidden" name="limit" value="{{ filters.limit }}" />
+          <input type="hidden" name="next_page" value="/dead-letters" />
+          <button type="submit" class="btn-combo">Relancer les taches filtrees</button>
+        </form>
+        <p class="muted">Resultats: {{ dead_tasks|length }} tache(s).</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Attempts</th>
+                <th>Payload</th>
+                <th>Message</th>
+                <th>Finished</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for task in dead_tasks %}
+              <tr>
+                <td class="mono">{{ task.id }}</td>
+                <td>{{ task.type }}</td>
+                <td>
+                  <span class="status-pill status-{{ (task.status or 'unknown')|lower }}">{{ task.status }}</span>
+                </td>
+                <td>{{ task.attempts }} / {{ task.max_attempts }}</td>
+                <td class="mono">{{ task.payload }}</td>
+                <td>{{ task.message or "-" }}</td>
+                <td>{{ task.finished_at or "-" }}</td>
+                <td>
+                  <form method="post" action="/tasks/requeue" class="inline-form">
+                    <input type="hidden" name="task_id" value="{{ task.id }}" />
+                    <input type="hidden" name="next_page" value="/dead-letters" />
+                    <button type="submit" class="btn-combo">Relancer</button>
+                  </form>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="8">Aucune tache dead-letter pour le moment.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>
+

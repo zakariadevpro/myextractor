@@ -1,0 +1,9 @@
+db_url: "sqlite:///./data/winxtract.db"
+headless: true
+max_pages: 4
+min_domain_delay: 1.0
+default_timeout_ms: 30000
+max_retries: 3
+backoff_min: 1.0
+backoff_max: 10.0
+max_source_concurrency: 3

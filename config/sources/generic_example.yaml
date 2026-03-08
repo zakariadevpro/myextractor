@@ -1,0 +1,27 @@
+slug: generic_demo
+name: generic source template
+scraper: generic_css
+enabled: false
+respect_robots: true
+start_urls:
+- https://example.com/public-directory
+selectors:
+  card: css:.listing-card
+  name: css:.listing-card__title
+  city: xpath:.//span[contains(@class,'listing-card__city')]
+  phone: css:.listing-card__phone
+  website: css:.listing-card__website
+  next_page: css:a.next
+params:
+  pagination_mode: click
+  max_pages: 5
+  note: 'Selectors support css: / xpath: prefixes or raw //xpath'
+  privacy_mode: particulier_conforme
+  privacy_profile: b2c_conforme
+  privacy_drop_person_records: true
+  privacy_drop_private_email_records: true
+  privacy_redact_name: true
+  privacy_redact_contact: true
+  privacy_redact_address: true
+  privacy_redact_page_url: true
+  privacy_sanitize_description: true

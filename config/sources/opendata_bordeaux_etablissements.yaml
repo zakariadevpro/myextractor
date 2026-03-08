@@ -1,0 +1,35 @@
+slug: opendata_bordeaux_etablissements
+name: opendata.bordeaux-metropole.fr/fi_etabl_p
+scraper: open_data_json
+enabled: true
+respect_robots: true
+start_urls:
+- https://opendata.bordeaux-metropole.fr/api/explore/v2.1/catalog/datasets/fi_etabl_p/records
+selectors:
+  name: raison_sociale
+  city: nom
+  website: url
+  phone: telephone
+  address: adresse
+  category: section
+  description: activite_commerce
+params:
+  stable_pack: true
+  items_path: results
+  pagination_mode: offset
+  page_size: 100
+  max_pages: 20
+  limit_param: limit
+  offset_param: offset
+  timeout_seconds: 45
+  max_items_per_url: 5000
+  privacy_mode: particulier_conforme
+  privacy_drop_person_records: true
+  privacy_drop_private_email_records: true
+  privacy_redact_contact: true
+  privacy_redact_address: true
+  privacy_redact_page_url: true
+  privacy_sanitize_description: true
+  note: Open data Bordeaux Metropole, source publique sans authentification.
+  privacy_profile: b2c_conforme
+  privacy_redact_name: true

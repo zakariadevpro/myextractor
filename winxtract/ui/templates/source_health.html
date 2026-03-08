@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WinXtract Source Health</title>
+    <link rel="stylesheet" href="{{ static_url('style.css') }}" />
+    <link rel="icon" type="image/svg+xml" href="{{ static_url('logo-winxtract-mark.svg') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <a class="brand-badge" href="/">
+          <img class="brand-logo" src="{{ static_url('logo-winxtract-mark.svg') }}" alt="WinXtract logo" />
+          <span class="brand-word">WinXtract</span>
+        </a>
+        <h1>Source Health</h1>
+        <p>Suivi de la fiabilite des sources.</p>
+        <nav class="top-nav">
+          <a href="/">Dashboard</a>
+          <a href="/onboarding">Onboarding</a>
+          <a href="/operations">Operations</a>
+          <a href="/exports">Exports</a>
+          <a href="/sources">Sources</a>
+          <a href="/leads">Leads</a>
+          <a href="/quality">Qualite</a>
+          <a class="is-active" href="/source-health">Source Health</a>
+          <a href="/scheduler">Scheduler</a>
+          <a href="/tasks">Taches</a>
+          <a href="/dead-letters">Dead Letters</a>
+          <a href="/errors">Logs erreurs</a>
+        </nav>
+      </header>
+
+      {% if msg %}
+      <section class="notice">{{ msg }}</section>
+      {% endif %}
+
+      <section class="panel-grid">
+        <section class="panel">
+          <h2>Parametres</h2>
+          <form method="get" action="/source-health">
+            <label for="window_jobs">Fenetre jobs</label>
+            <input id="window_jobs" name="window_jobs" type="number" min="1" max="200" value="{{ report.window_jobs }}" />
+            <label for="auto_disable_failures">Seuil auto-disable (consecutive failures)</label>
+            <input
+              id="auto_disable_failures"
+              name="auto_disable_failures"
+              type="number"
+              min="0"
+              max="100"
+              value="{{ report.auto_disable_failures }}"
+            />
+            <button type="submit">Recalculer</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Action auto-disable</h2>
+          <form method="post" action="/source-health/auto-disable">
+            <label for="window_jobs_post">Fenetre jobs</label>
+            <input
+              id="window_jobs_post"
+              name="window_jobs"
+              type="number"
+              min="1"
+              max="200"
+              value="{{ report.window_jobs }}"
+            />
+            <label for="auto_disable_failures_post">Seuil auto-disable</label>
+            <input
+              id="auto_disable_failures_post"
+              name="auto_disable_failures"
+              type="number"
+              min="1"
+              max="100"
+              value="{{ report.auto_disable_failures if report.auto_disable_failures > 0 else 3 }}"
+            />
+            <button class="btn-warn" type="submit">Appliquer auto-disable maintenant</button>
+          </form>
+        </section>
+      </section>
+
+      <section class="kpi-grid">
+        <article class="kpi"><span class="label">Sources</span><strong>{{ report.sources_count }}</strong></article>
+        <article class="kpi"><span class="label">Disabled maintenant</span><strong>{{ report.disabled_now }}</strong></article>
+        <article class="kpi"><span class="label">Fenetre</span><strong>{{ report.window_jobs }}</strong></article>
+        <article class="kpi"><span class="label">Seuil auto-disable</span><strong>{{ report.auto_disable_failures }}</strong></article>
+      </section>
+
+      <section class="panel">
+        <h2>Etat par source</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Enabled</th>
+                <th>Recommandee</th>
+                <th>Recent</th>
+                <th>Success</th>
+                <th>Failed</th>
+                <th>Consecutive failed</th>
+                <th>Success rate</th>
+                <th>Avg leads</th>
+                <th>Avg errors</th>
+                <th>Last status</th>
+                <th>Last finished</th>
+                <th>Candidate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in report["items"] %}
+              <tr>
+                <td>{{ row.source_name }}</td>
+                <td>
+                  <span class="status-pill {% if row.enabled %}status-success{% else %}status-disabled{% endif %}">
+                    {% if row.enabled %}Actif{% else %}Inactif{% endif %}
+                  </span>
+                </td>
+                <td>
+                  <span class="status-pill {% if row.stable_pack %}status-success{% else %}status-unknown{% endif %}">
+                    {% if row.stable_pack %}Oui{% else %}Non{% endif %}
+                  </span>
+                </td>
+                <td>{{ row.recent_jobs }}</td>
+                <td>{{ row.success_count }}</td>
+                <td>{{ row.failed_count }}</td>
+                <td>{{ row.consecutive_failures }}</td>
+                <td>{{ row.success_rate }}</td>
+                <td>{{ row.avg_leads }}</td>
+                <td>{{ row.avg_errors }}</td>
+                <td>{{ row.last_status }}</td>
+                <td>{{ row.last_finished_at or "-" }}</td>
+                <td>
+                  <span class="status-pill {% if row.auto_disable_candidate %}status-failed{% else %}status-success{% endif %}">
+                    {% if row.auto_disable_candidate %}Oui{% else %}Non{% endif %}
+                  </span>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="13">Aucune source.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+
+
+
+
+

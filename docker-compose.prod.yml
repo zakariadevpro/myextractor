@@ -1,0 +1,102 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: winxtract
+      POSTGRES_USER: winxtract
+      POSTGRES_PASSWORD: winxtract
+    volumes:
+    - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U winxtract -d winxtract
+      interval: 10s
+      timeout: 5s
+      retries: 8
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      WINXTRACT_DB_URL: postgresql+psycopg://winxtract:winxtract@postgres:5432/winxtract
+      WINXTRACT_TASK_BACKEND: db_queue
+      WINXTRACT_API_RATE_LIMIT_PER_MINUTE: 300
+      WINXTRACT_SOURCE_HEALTH_WINDOW_JOBS: 20
+      WINXTRACT_SOURCE_HEALTH_AUTO_DISABLE_FAILURES: 5
+      WINXTRACT_EXPORT_REQUIRED_PRIVACY_MODE: particulier_conforme
+    command:
+    - python
+    - -m
+    - winxtract.cli
+    - ui
+    - --host
+    - 0.0.0.0
+    - --port
+    - "8787"
+    ports:
+    - 8787:8787
+    volumes:
+    - ./config:/app/config
+    - ./exports:/app/exports
+    - ./logs:/app/logs
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      WINXTRACT_DB_URL: postgresql+psycopg://winxtract:winxtract@postgres:5432/winxtract
+      WINXTRACT_TASK_BACKEND: db_queue
+      WINXTRACT_WORKER_POLL_SECONDS: 1.0
+      WINXTRACT_SOURCE_HEALTH_WINDOW_JOBS: 20
+      WINXTRACT_SOURCE_HEALTH_AUTO_DISABLE_FAILURES: 5
+      WINXTRACT_EXPORT_REQUIRED_PRIVACY_MODE: particulier_conforme
+    command:
+    - python
+    - -m
+    - winxtract.cli
+    - queue-worker
+    - --sources-dir
+    - config/sources
+    volumes:
+    - ./config:/app/config
+    - ./exports:/app/exports
+    - ./logs:/app/logs
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    depends_on:
+    - ui
+    ports:
+    - 9090:9090
+    volumes:
+    - ./ops/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    restart: unless-stopped
+    depends_on:
+    - prometheus
+    ports:
+    - 3000:3000
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+    - ./ops/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    - ./ops/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  pgdata:

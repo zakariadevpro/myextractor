@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WinXtract Logs Erreurs</title>
+    <link rel="stylesheet" href="{{ static_url('style.css') }}" />
+    <link rel="icon" type="image/svg+xml" href="{{ static_url('logo-winxtract-mark.svg') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <a class="brand-badge" href="/">
+          <img class="brand-logo" src="{{ static_url('logo-winxtract-mark.svg') }}" alt="WinXtract logo" />
+          <span class="brand-word">WinXtract</span>
+        </a>
+        <h1>Logs erreurs</h1>
+        <p>Dernieres erreurs de scraping.</p>
+        <nav class="top-nav">
+          <a href="/">Dashboard</a>
+          <a href="/onboarding">Onboarding</a>
+          <a href="/operations">Operations</a>
+          <a href="/exports">Exports</a>
+          <a href="/sources">Sources</a>
+          <a href="/leads">Leads</a>
+          <a href="/quality">Qualite</a>
+          <a href="/source-health">Source Health</a>
+          <a href="/scheduler">Scheduler</a>
+          <a href="/tasks">Taches</a>
+          <a href="/dead-letters">Dead Letters</a>
+          <a class="is-active" href="/errors">Logs erreurs</a>
+        </nav>
+      </header>
+
+      <section class="panel">
+        <h2>Erreurs recentes</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Date</th>
+                <th>Source</th>
+                <th>Type</th>
+                <th>Message</th>
+                <th>URL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for err in error_rows %}
+              <tr>
+                <td class="mono">{{ err.id }}</td>
+                <td>{{ err.created_at }}</td>
+                <td class="mono">{{ err.source_slug }}</td>
+                <td>{{ err.error_type }}</td>
+                <td>{{ err.message }}</td>
+                <td>{{ err.page_url or "-" }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="6">Aucune erreur en base.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+
+
+
+
+

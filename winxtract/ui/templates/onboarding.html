@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WinXtract Onboarding</title>
+    <link rel="stylesheet" href="{{ static_url('style.css') }}" />
+    <link rel="icon" type="image/svg+xml" href="{{ static_url('logo-winxtract-mark.svg') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <a class="brand-badge" href="/">
+          <img class="brand-logo" src="{{ static_url('logo-winxtract-mark.svg') }}" alt="WinXtract logo" />
+          <span class="brand-word">WinXtract</span>
+        </a>
+        <h1>Onboarding debutant</h1>
+        <p>3 etapes pour configurer et lancer ton premier cycle complet.</p>
+        <nav class="top-nav">
+          <a href="/">Dashboard</a>
+          <a class="is-active" href="/onboarding">Onboarding</a>
+          <a href="/operations">Operations</a>
+          <a href="/exports">Exports</a>
+          <a href="/sources">Sources</a>
+          <a href="/leads">Leads</a>
+          <a href="/quality">Qualite</a>
+          <a href="/source-health">Source Health</a>
+          <a href="/scheduler">Scheduler</a>
+          <a href="/tasks">Taches</a>
+          <a href="/dead-letters">Dead Letters</a>
+          <a href="/errors">Logs erreurs</a>
+        </nav>
+      </header>
+
+      {% if msg %}
+      <section class="notice">{{ msg }}</section>
+      {% endif %}
+
+      <section class="kpi-grid">
+        <article class="kpi"><span class="label">Sources actives</span><strong>{{ active_sources_count }}</strong></article>
+        <article class="kpi">
+          <span class="label">Privacy pret</span>
+          <strong>{{ privacy_ready_count }}/{{ active_sources_count }}</strong>
+        </article>
+        <article class="kpi">
+          <span class="label">Dernier job succes</span>
+          <strong>{% if last_success_job %}#{{ last_success_job.id }}{% else %}-{% endif %}</strong>
+        </article>
+        <article class="kpi">
+          <span class="label">Dernier export</span>
+          <strong>{% if last_export %}OK{% else %}-{% endif %}</strong>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>Checklist de demarrage</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Etape</th>
+                <th>Statut</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Etape 1 - Profil privacy</td>
+                <td>
+                  <span class="status-pill {% if privacy_ready %}status-success{% else %}status-failed{% endif %}">
+                    {% if privacy_ready %}Pret{% else %}A faire{% endif %}
+                  </span>
+                </td>
+                <td>{{ privacy_ready_count }} source(s) conforme(s) sur {{ active_sources_count }} active(s)</td>
+              </tr>
+              <tr>
+                <td>Etape 2 - Run + Export</td>
+                <td>
+                  <span class="status-pill {% if last_success_job %}status-success{% else %}status-queued{% endif %}">
+                    {% if last_success_job %}Lance{% else %}A lancer{% endif %}
+                  </span>
+                </td>
+                <td>{% if last_success_job %}Dernier succes: job #{{ last_success_job.id }}{% else %}Aucun job succes detecte{% endif %}</td>
+              </tr>
+              <tr>
+                <td>Etape 3 - Recuperation export</td>
+                <td>
+                  <span class="status-pill {% if last_export %}status-success{% else %}status-queued{% endif %}">
+                    {% if last_export %}Disponible{% else %}En attente{% endif %}
+                  </span>
+                </td>
+                <td>
+                  {% if last_export %}
+                  <a class="btn-ok" href="/exports-files/{{ last_export.name }}" target="_blank">Ouvrir {{ last_export.name }}</a>
+                  {% else %}
+                  Aucun fichier export detecte
+                  {% endif %}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {% if blockers %}
+      <section class="panel">
+        <h2>Points a corriger</h2>
+        <ul class="plain-list">
+          {% for blocker in blockers %}
+          <li>{{ blocker }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+
+      <section class="panel-grid">
+        <section class="panel">
+          <h2>Etape 1 - Profil privacy</h2>
+          <p class="muted">Choisis un profil de conformite avant extraction.</p>
+          <form method="post" action="/sources/privacy-profile">
+            <input type="hidden" name="next_page" value="/onboarding" />
+            <label for="privacy_source">Source cible</label>
+            <select id="privacy_source" name="source_slug">
+              <option value="*">Toutes les sources</option>
+              {% for source in source_entries %}
+              <option value="{{ source.slug }}">{{ source.name }}</option>
+              {% endfor %}
+            </select>
+
+            <label for="privacy_profile">Profil</label>
+            <select id="privacy_profile" name="privacy_profile">
+              <option value="b2c_conforme">B2C conforme (recommande)</option>
+              <option value="b2c_etendu">B2C etendu</option>
+              <option value="none">Aucun</option>
+            </select>
+            <button type="submit">Appliquer le profil</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Etape 2 - Run source + Export auto</h2>
+          <p class="muted">Une seule action pour lancer le scrape puis generer le fichier.</p>
+          <form method="post" action="/run-export">
+            <input type="hidden" name="next_page" value="/onboarding" />
+            <label for="run_source">Source</label>
+            <select id="run_source" name="source_slug">
+              <option value="">Toutes les sources actives</option>
+              {% for source in sources %}
+              <option value="{{ source.slug }}">{{ source.name }}</option>
+              {% endfor %}
+            </select>
+
+            <label for="export_format">Format export</label>
+            <select id="export_format" name="export_format">
+              <option value="csv">CSV</option>
+              <option value="json">JSON</option>
+              <option value="xlsx">XLSX</option>
+            </select>
+
+            <label for="min_score">Score minimum</label>
+            <input id="min_score" name="min_score" type="number" value="0" min="0" max="100" />
+
+            <label for="city">Ville (optionnel)</label>
+            <input id="city" name="city" type="text" placeholder="Paris" />
+
+            <label for="name_contains">Nom contient (optionnel)</label>
+            <input id="name_contains" name="name_contains" type="text" placeholder="Restaurant" />
+
+            <label for="has_email">Email</label>
+            <select id="has_email" name="has_email">
+              <option value="">Tous</option>
+              <option value="true">Avec email</option>
+              <option value="false">Sans email</option>
+            </select>
+
+            <label for="has_phone">Telephone</label>
+            <select id="has_phone" name="has_phone">
+              <option value="">Tous</option>
+              <option value="true">Avec telephone</option>
+              <option value="false">Sans telephone</option>
+            </select>
+
+            <label for="date_from">Date debut (ISO, optionnel)</label>
+            <input id="date_from" name="date_from" type="text" placeholder="2026-03-01T00:00:00" />
+
+            <label for="date_to">Date fin (ISO, optionnel)</label>
+            <input id="date_to" name="date_to" type="text" placeholder="2026-03-31T23:59:59" />
+
+            <button type="submit" class="btn-combo">Run source + Export auto</button>
+          </form>
+          <hr class="divider" />
+          <form method="post" action="/run-export-all">
+            <input type="hidden" name="next_page" value="/onboarding" />
+            <label for="all_export_format">Ou Run France entiere + Export auto</label>
+            <select id="all_export_format" name="export_format">
+              <option value="csv">CSV</option>
+              <option value="json">JSON</option>
+              <option value="xlsx">XLSX</option>
+            </select>
+            <label for="all_min_score">Score minimum</label>
+            <input id="all_min_score" name="min_score" type="number" value="0" min="0" max="100" />
+            <button type="submit" class="btn-combo">Run France entiere + Export auto</button>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2>Etape 3 - Verifier et exploiter</h2>
+          <p class="muted">Une fois la tache queuee, controle les resultats avec ces liens.</p>
+          <div class="quick-grid">
+            <article class="quick-card">
+              <h3>Voir les leads</h3>
+              <p>Controle les fiches normalisees dans la base locale.</p>
+              <a class="btn-ok" href="/leads">Ouvrir Leads</a>
+            </article>
+            <article class="quick-card">
+              <h3>Voir les exports</h3>
+              <p>Recupere les fichiers CSV, JSON ou XLSX generes.</p>
+              <a class="btn-ok" href="/exports">Ouvrir Exports</a>
+            </article>
+            <article class="quick-card">
+              <h3>Suivre les taches</h3>
+              <p>Observe le statut des executions en temps reel.</p>
+              <a class="btn-ok" href="/tasks">Ouvrir Taches</a>
+            </article>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>
+
+
+

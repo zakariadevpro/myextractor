@@ -1,0 +1,20 @@
+<svg width="720" height="210" viewBox="0 0 720 210" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">WinXtract Full Logo</title>
+  <desc id="desc">WinXtract logo with gradient symbol, wordmark, and baseline.</desc>
+  <defs>
+    <linearGradient id="symA" x1="80" y1="20" x2="300" y2="168" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2CEACB" />
+      <stop offset="1" stop-color="#24A8D8" />
+    </linearGradient>
+    <linearGradient id="symB" x1="260" y1="20" x2="500" y2="168" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3AB2EC" />
+      <stop offset="1" stop-color="#4C6EF1" />
+    </linearGradient>
+  </defs>
+
+  <path d="M90 42 L188 174 L290 60 L390 174 L488 42" stroke="url(#symA)" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M90 42 L188 174 L290 60 L390 174 L488 42" stroke="url(#symB)" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" opacity="0.72" />
+
+  <text x="120" y="196" fill="#F4FFFE" font-family="Segoe UI, Manrope, sans-serif" font-size="72" font-weight="800" letter-spacing="2">WINXTRACT</text>
+  <text x="126" y="208" fill="#CCECE8" font-family="Segoe UI, Manrope, sans-serif" font-size="18" font-weight="600" letter-spacing="8">DIGITAL DATA EXTRACTION</text>
+</svg>

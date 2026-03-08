@@ -1,0 +1,19 @@
+slug: google_maps_paris_restaurants
+name: google.com/maps
+scraper: google_maps_public
+enabled: false
+respect_robots: true
+start_urls:
+- https://www.google.com/maps/search/restaurants+paris/
+selectors: {}
+params:
+  note: Enable only for public pages and legal scope validated in your jurisdiction.
+  privacy_mode: particulier_conforme
+  privacy_profile: b2c_conforme
+  privacy_drop_person_records: true
+  privacy_drop_private_email_records: true
+  privacy_redact_name: true
+  privacy_redact_contact: true
+  privacy_redact_address: true
+  privacy_redact_page_url: true
+  privacy_sanitize_description: true

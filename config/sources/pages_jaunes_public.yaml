@@ -1,0 +1,19 @@
+slug: pages_jaunes_plombier_paris
+name: pagesjaunes.fr (pros)
+scraper: pages_jaunes_public
+enabled: false
+respect_robots: true
+start_urls:
+- https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=plombier&ou=Paris
+selectors: {}
+params:
+  note: Enable after validating terms and selector stability.
+  privacy_mode: particulier_conforme
+  privacy_profile: b2c_conforme
+  privacy_drop_person_records: true
+  privacy_drop_private_email_records: true
+  privacy_redact_name: true
+  privacy_redact_contact: true
+  privacy_redact_address: true
+  privacy_redact_page_url: true
+  privacy_sanitize_description: true

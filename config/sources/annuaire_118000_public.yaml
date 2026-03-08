@@ -1,0 +1,44 @@
+slug: annuaire.118000.fr
+name: annuaire.118000.fr
+scraper: annuaire_118000_public
+enabled: true
+respect_robots: true
+start_urls:
+- https://annuaire.118000.fr/
+- https://annuaire.118000.fr/v_paris_75
+- https://annuaire.118000.fr/v_lyon_69
+- https://annuaire.118000.fr/v_marseille_13
+- https://annuaire.118000.fr/v_toulouse_31
+- https://annuaire.118000.fr/v_nice_06
+- https://annuaire.118000.fr/v_nantes_44
+- https://annuaire.118000.fr/v_bordeaux_33
+- https://annuaire.118000.fr/v_lille_59
+- https://annuaire.118000.fr/v_rennes_35
+selectors:
+  card: section.card
+  name: h2.name a
+  address: .address
+  phone: .phone
+  next_page: link[rel='next']
+params:
+  stable_pack: true
+  crawl_mode: very_large
+  max_pages: 600
+  allow_link_discovery: true
+  max_discovered_urls: 12000
+  max_links_per_page: 500
+  allowed_hosts:
+  - annuaire.118000.fr
+  discovery_patterns:
+  - ^https://annuaire\.118000\.fr/v_[^?#]+
+  - ^https://annuaire\.118000\.fr/r_[^?#]+
+  note: Source publique en mode tres large (seed multi-villes + discovery). Verifier la conformite d'usage selon CGU et cadre legal local.
+  privacy_mode: particulier_conforme
+  privacy_profile: b2c_conforme
+  privacy_drop_person_records: true
+  privacy_drop_private_email_records: true
+  privacy_redact_name: true
+  privacy_redact_contact: true
+  privacy_redact_address: true
+  privacy_redact_page_url: true
+  privacy_sanitize_description: true

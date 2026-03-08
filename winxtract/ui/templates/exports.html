@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WinXtract Exports</title>
+    <link rel="stylesheet" href="{{ static_url('style.css') }}" />
+    <link rel="icon" type="image/svg+xml" href="{{ static_url('logo-winxtract-mark.svg') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <a class="brand-badge" href="/">
+          <img class="brand-logo" src="{{ static_url('logo-winxtract-mark.svg') }}" alt="WinXtract logo" />
+          <span class="brand-word">WinXtract</span>
+        </a>
+        <h1>Exports</h1>
+        <p>Filtrage et export des leads stockes.</p>
+        <nav class="top-nav">
+          <a href="/">Dashboard</a>
+          <a href="/onboarding">Onboarding</a>
+          <a href="/operations">Operations</a>
+          <a class="is-active" href="/exports">Exports</a>
+          <a href="/sources">Sources</a>
+          <a href="/leads">Leads</a>
+          <a href="/quality">Qualite</a>
+          <a href="/source-health">Source Health</a>
+          <a href="/scheduler">Scheduler</a>
+          <a href="/tasks">Taches</a>
+          <a href="/dead-letters">Dead Letters</a>
+          <a href="/errors">Logs erreurs</a>
+        </nav>
+      </header>
+
+      {% if msg %}
+      <section class="notice">{{ msg }}</section>
+      {% endif %}
+
+      <section class="kpi-grid">
+        <article class="kpi"><span class="label">Leads disponibles</span><strong>{{ total_leads }}</strong></article>
+      </section>
+
+      <section class="panel">
+        <h2>Exporter</h2>
+        <form method="post" action="/export">
+          <input type="hidden" name="next_page" value="/exports" />
+          <label for="export_format">Format</label>
+          <select id="export_format" name="export_format">
+            <option value="csv">CSV</option>
+            <option value="json">JSON</option>
+            <option value="xlsx">XLSX</option>
+          </select>
+
+          <label for="min_score">Score minimum</label>
+          <p class="field-help">0 a 100, applique avant export.</p>
+          <input id="min_score" name="min_score" type="number" value="0" min="0" max="100" />
+
+          <label for="city">Ville (exacte)</label>
+          <input id="city" name="city" type="text" placeholder="Paris" />
+
+          <label for="name_contains">Nom contient</label>
+          <input id="name_contains" name="name_contains" type="text" placeholder="Coiffure" />
+
+          <label for="has_email">Email</label>
+          <select id="has_email" name="has_email">
+            <option value="">Tous</option>
+            <option value="true">Avec email</option>
+            <option value="false">Sans email</option>
+          </select>
+
+          <label for="has_phone">Telephone</label>
+          <select id="has_phone" name="has_phone">
+            <option value="">Tous</option>
+            <option value="true">Avec telephone</option>
+            <option value="false">Sans telephone</option>
+          </select>
+
+          <label for="date_from">Date debut (ISO)</label>
+          <input id="date_from" name="date_from" type="text" placeholder="2026-03-01T00:00:00" />
+
+          <label for="date_to">Date fin (ISO)</label>
+          <input id="date_to" name="date_to" type="text" placeholder="2026-03-31T23:59:59" />
+
+          <label for="export_source">Source (optionnel)</label>
+          <select id="export_source" name="source_slug">
+            <option value="">Toutes les sources</option>
+            {% for source in sources %}
+            <option value="{{ source.slug }}">{{ source.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Exporter</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Fichiers exportes</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Fichier</th>
+                <th>Taille (octets)</th>
+                <th>Date UTC</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for file in export_files %}
+              <tr>
+                <td class="mono">{{ file.name }}</td>
+                <td>{{ file.size }}</td>
+                <td>{{ file.mtime }}</td>
+                <td><a class="btn-ok" href="/exports-files/{{ file.name }}" target="_blank">Telecharger</a></td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="4">Aucun export pour le moment.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+
+
+
+
+

@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+- job_name: winxtract-ui
+  static_configs:
+  - targets:
+    - ui:8787
+  metrics_path: /metrics/prometheus

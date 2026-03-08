@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.env
+*.log
+playwright-report/
+test-results/
+data/
+exports/
+package.json.bak
+src_node_backup/
+tests/*.bak

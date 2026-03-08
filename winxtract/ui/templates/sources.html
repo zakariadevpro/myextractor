@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WinXtract Sources</title>
+    <link rel="stylesheet" href="{{ static_url('style.css') }}" />
+    <link rel="icon" type="image/svg+xml" href="{{ static_url('logo-winxtract-mark.svg') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <a class="brand-badge" href="/">
+          <img class="brand-logo" src="{{ static_url('logo-winxtract-mark.svg') }}" alt="WinXtract logo" />
+          <span class="brand-word">WinXtract</span>
+        </a>
+        <h1>Sources</h1>
+        <p>Activation des connecteurs et profils privacy.</p>
+        <nav class="top-nav">
+          <a href="/">Dashboard</a>
+          <a href="/onboarding">Onboarding</a>
+          <a href="/operations">Operations</a>
+          <a href="/exports">Exports</a>
+          <a class="is-active" href="/sources">Sources</a>
+          <a href="/leads">Leads</a>
+          <a href="/quality">Qualite</a>
+          <a href="/source-health">Source Health</a>
+          <a href="/scheduler">Scheduler</a>
+          <a href="/tasks">Taches</a>
+          <a href="/dead-letters">Dead Letters</a>
+          <a href="/errors">Logs erreurs</a>
+        </nav>
+      </header>
+
+      {% if msg %}
+      <section class="notice">{{ msg }}</section>
+      {% endif %}
+
+      <section class="kpi-grid">
+        <article class="kpi"><span class="label">Sources actives</span><strong>{{ active_sources_count }}</strong></article>
+        <article class="kpi"><span class="label">Sources recommandees</span><strong>{{ stable_sources_count }}</strong></article>
+        <article class="kpi"><span class="label">Sources total</span><strong>{{ source_entries|length }}</strong></article>
+      </section>
+
+      <section class="panel">
+        <h2>Profil privacy B2C</h2>
+        <form method="post" action="/sources/privacy-profile">
+          <input type="hidden" name="next_page" value="/sources" />
+          <label for="privacy_source">Source cible</label>
+          <p class="field-help">Choisis une source precise ou toutes les sources.</p>
+          <select id="privacy_source" name="source_slug">
+            <option value="*">Toutes les sources</option>
+            {% for source in source_entries %}
+            <option value="{{ source.slug }}">{{ source.name }}</option>
+            {% endfor %}
+          </select>
+
+          <label for="privacy_profile">Profil</label>
+          <select id="privacy_profile" name="privacy_profile">
+            <option value="b2c_conforme">B2C conforme (recommande)</option>
+            <option value="b2c_etendu">B2C etendu</option>
+            <option value="none">Aucun</option>
+          </select>
+          <button type="submit">Appliquer profil</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Catalogue des sources</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Slug</th>
+                <th>Scraper</th>
+                <th>Recommandee</th>
+                <th>Actif</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for source in source_entries %}
+              <tr>
+                <td>{{ source.name }}</td>
+                <td class="mono">{{ source.slug }}</td>
+                <td class="mono">{{ source.scraper }}</td>
+                <td>
+                  <span class="status-pill {% if source.stable_pack %}status-success{% else %}status-unknown{% endif %}">
+                    {% if source.stable_pack %}Oui{% else %}Non{% endif %}
+                  </span>
+                </td>
+                <td>
+                  <span class="status-pill {% if source.enabled %}status-success{% else %}status-disabled{% endif %}">
+                    {% if source.enabled %}Actif{% else %}Inactif{% endif %}
+                  </span>
+                </td>
+                <td>
+                  <form method="post" action="/sources/toggle" class="inline-form">
+                    <input type="hidden" name="next_page" value="/sources" />
+                    <input type="hidden" name="source_slug" value="{{ source.slug }}" />
+                    <input type="hidden" name="enabled" value="{% if source.enabled %}false{% else %}true{% endif %}" />
+                    <button type="submit" class="{% if source.enabled %}btn-warn{% else %}btn-ok{% endif %}">
+                      {% if source.enabled %}Desactiver{% else %}Activer{% endif %}
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="6">Aucune source.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+
+
+
+
+

@@ -1,0 +1,31 @@
+slug: data_gouv_ameli_centres_sante
+name: data.gouv.fr/annuaire-sante-ameli-cds
+scraper: data_gouv_dataset
+enabled: true
+respect_robots: true
+start_urls:
+- https://www.data.gouv.fr/api/1/datasets/annuaire-sante-ameli/
+selectors:
+  name: etab_raison_sociale
+  city: coordonnees_ville
+  phone: coordonnees_num_tel
+  address: coordonnees_voie
+  category: specialite_libelle
+  description: type_etab_libelle
+params:
+  stable_pack: true
+  preferred_formats:
+  - csv
+  resource_title_contains: "centres de sant\xE9"
+  max_items_per_resource: 10000
+  timeout_seconds: 60
+  privacy_mode: particulier_conforme
+  privacy_profile: b2c_conforme
+  note: "Data.gouv - Annuaire sant\xE9 Ameli (Centres de sant\xE9)."
+  privacy_drop_person_records: true
+  privacy_drop_private_email_records: true
+  privacy_redact_name: true
+  privacy_redact_contact: true
+  privacy_redact_address: true
+  privacy_redact_page_url: true
+  privacy_sanitize_description: true

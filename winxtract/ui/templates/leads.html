@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WinXtract Leads</title>
+    <link rel="stylesheet" href="{{ static_url('style.css') }}" />
+    <link rel="icon" type="image/svg+xml" href="{{ static_url('logo-winxtract-mark.svg') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <a class="brand-badge" href="/">
+          <img class="brand-logo" src="{{ static_url('logo-winxtract-mark.svg') }}" alt="WinXtract logo" />
+          <span class="brand-word">WinXtract</span>
+        </a>
+        <h1>Leads</h1>
+        <p>Consultation des leads stockes en base locale.</p>
+        <nav class="top-nav">
+          <a href="/">Dashboard</a>
+          <a href="/onboarding">Onboarding</a>
+          <a href="/operations">Operations</a>
+          <a href="/exports">Exports</a>
+          <a href="/sources">Sources</a>
+          <a class="is-active" href="/leads">Leads</a>
+          <a href="/quality">Qualite</a>
+          <a href="/source-health">Source Health</a>
+          <a href="/scheduler">Scheduler</a>
+          <a href="/tasks">Taches</a>
+          <a href="/dead-letters">Dead Letters</a>
+          <a href="/errors">Logs erreurs</a>
+        </nav>
+      </header>
+
+      <section class="panel">
+        <form method="get" action="/leads">
+          <label for="source_slug">Source</label>
+          <p class="field-help">Filtre par source, ou laisse Toutes.</p>
+          <select id="source_slug" name="source_slug">
+            <option value="">Toutes les sources</option>
+            {% for source in source_entries %}
+            <option value="{{ source.slug }}" {% if source_slug == source.slug %}selected{% endif %}>{{ source.name }} ({{ source.slug }})</option>
+            {% endfor %}
+          </select>
+
+          <label for="min_score">Score minimum</label>
+          <input id="min_score" name="min_score" type="number" min="0" max="100" value="{{ min_score }}" />
+
+          <label for="limit">Limite</label>
+          <input id="limit" name="limit" type="number" min="1" max="500" value="{{ limit }}" />
+
+          <button type="submit">Filtrer</button>
+          <a class="btn-warn" href="/leads">Reset filtres</a>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Resultats ({{ leads|length }})</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Source</th>
+                <th>Nom</th>
+                <th>Ville</th>
+                <th>Phones</th>
+                <th>Emails</th>
+                <th>Score</th>
+                <th>URL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for lead in leads %}
+              <tr>
+                <td class="mono">{{ lead.id }}</td>
+                <td class="mono">{{ lead.source_slug }}</td>
+                <td>{{ lead.name or "-" }}</td>
+                <td>{{ lead.city or "-" }}</td>
+                <td>{{ lead.phones or "-" }}</td>
+                <td>{{ lead.emails or "-" }}</td>
+                <td>{{ lead.score }}</td>
+                <td>{{ lead.page_url or "-" }}</td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="8">Aucun lead avec ce filtre.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+
+
+
+
+

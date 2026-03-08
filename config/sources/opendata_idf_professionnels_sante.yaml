@@ -1,0 +1,34 @@
+slug: opendata_idf_professionnels_sante
+name: data.iledefrance.fr/professionnels-sante
+scraper: open_data_json
+enabled: true
+respect_robots: true
+start_urls:
+- https://data.iledefrance.fr/api/explore/v2.1/catalog/datasets/annuaire-et-localisation-des-professionnels-de-sante/records
+selectors:
+  name: nom
+  city: commune
+  phone: column_10
+  address: adresse
+  category: libelle_profession
+  description: activite_principale
+params:
+  stable_pack: true
+  items_path: results
+  pagination_mode: offset
+  page_size: 100
+  max_pages: 20
+  limit_param: limit
+  offset_param: offset
+  timeout_seconds: 45
+  max_items_per_url: 4000
+  privacy_mode: particulier_conforme
+  privacy_profile: b2c_conforme
+  note: Open data Ile-de-France. Donnees publiques sans authentification.
+  privacy_drop_person_records: true
+  privacy_drop_private_email_records: true
+  privacy_redact_name: true
+  privacy_redact_contact: true
+  privacy_redact_address: true
+  privacy_redact_page_url: true
+  privacy_sanitize_description: true

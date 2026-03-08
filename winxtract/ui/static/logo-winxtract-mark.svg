@@ -1,0 +1,16 @@
+<svg width="220" height="140" viewBox="0 0 220 140" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">WinXtract Logo Mark</title>
+  <desc id="desc">Stylized W with cyan to blue gradient on transparent background.</desc>
+  <defs>
+    <linearGradient id="g1" x1="20" y1="20" x2="116" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#26E7C9" />
+      <stop offset="1" stop-color="#25A7D8" />
+    </linearGradient>
+    <linearGradient id="g2" x1="104" y1="18" x2="200" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#37A8E8" />
+      <stop offset="1" stop-color="#4B6EF1" />
+    </linearGradient>
+  </defs>
+  <path d="M26 28 L70 104 L110 36 L150 104 L194 28" stroke="url(#g1)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M26 28 L70 104 L110 36 L150 104 L194 28" stroke="url(#g2)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" opacity="0.65" />
+</svg>

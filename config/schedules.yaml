@@ -1,0 +1,6 @@
+schedules:
+- source_slug: annuaire.118000.fr
+  enabled: true
+  interval_minutes: 120
+  export_format: csv
+  min_score: 0
