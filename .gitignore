@@ -11,3 +11,4 @@ exports/
 package.json.bak
 src_node_backup/
 tests/*.bak
+winxtract.egg-info/
