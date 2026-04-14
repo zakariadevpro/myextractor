@@ -21,7 +21,14 @@ from app.scrapers.sirene_api import SireneApiScraper
 logger = logging.getLogger(__name__)
 
 # Sync engine for Celery tasks (Celery doesn't support async natively)
-engine = create_engine(settings.database_url)
+engine = create_engine(
+    settings.database_url,
+    pool_size=5,
+    max_overflow=3,
+    pool_timeout=30,
+    pool_recycle=1800,
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(bind=engine)
 
 COMPANY_LEGAL_SUFFIXES = {
@@ -946,6 +953,31 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
             logger.info(f"Job {job_id} was cancelled")
             return
 
+        # Idempotency guard: if this is a retry, clean up leads from previous attempt
+        if job["status"] == "running":
+            existing_count = db.execute(
+                text("SELECT COUNT(*) FROM leads WHERE extraction_job_id = :id"),
+                {"id": job_id},
+            ).scalar() or 0
+            if existing_count > 0:
+                logger.info(
+                    "Job %s is a retry with %d existing leads — cleaning up previous attempt",
+                    job_id, existing_count,
+                )
+                db.execute(
+                    text("DELETE FROM lead_phones WHERE lead_id IN (SELECT id FROM leads WHERE extraction_job_id = :id)"),
+                    {"id": job_id},
+                )
+                db.execute(
+                    text("DELETE FROM lead_emails WHERE lead_id IN (SELECT id FROM leads WHERE extraction_job_id = :id)"),
+                    {"id": job_id},
+                )
+                db.execute(
+                    text("DELETE FROM leads WHERE extraction_job_id = :id"),
+                    {"id": job_id},
+                )
+                db.commit()
+
         # Update status to running
         db.execute(
             text(
@@ -1018,38 +1050,25 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
         leads_duplicate = 0
 
         for scraped, detected_lead_kind in selected_leads:
-            # Check for duplicates (same name + city in same org)
-            dup_check = db.execute(
-                text("""
-                    SELECT id FROM leads
-                    WHERE organization_id = :org_id
-                    AND LOWER(company_name) = LOWER(:name)
-                    AND LOWER(COALESCE(city, '')) = LOWER(COALESCE(:city, ''))
-                """),
-                {
-                    "org_id": str(job["organization_id"]),
-                    "name": scraped.company_name,
-                    "city": scraped.city,
-                },
-            )
-            existing = dup_check.first()
-
             lead_id = str(uuid.uuid4())
-            is_duplicate = existing is not None
 
-            if is_duplicate:
-                leads_duplicate += 1
-            else:
-                leads_new += 1
-            quality_score = _compute_initial_quality(
+            # Attempt atomic insert with ON CONFLICT to prevent race conditions.
+            # The unique index uq_leads_org_name_city covers
+            # (organization_id, LOWER(company_name), LOWER(COALESCE(city, ''))).
+            quality_score_new = _compute_initial_quality(
                 scraped,
                 source=source,
-                is_duplicate=is_duplicate,
+                is_duplicate=False,
+                weights=scoring_weights,
+            )
+            quality_score_dup = _compute_initial_quality(
+                scraped,
+                source=source,
+                is_duplicate=True,
                 weights=scoring_weights,
             )
 
-            # Insert lead
-            db.execute(
+            result = db.execute(
                 text("""
                     INSERT INTO leads (
                         id, organization_id, extraction_job_id, company_name,
@@ -1058,8 +1077,15 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                     ) VALUES (
                         :id, :org_id, :job_id, :name,
                         :siren, :naf, :sector, :website, :address, :postal,
-                        :city, :dept, :region, 'FR', :source, :source_url, :lead_kind, :is_dup, :quality_score
+                        :city, :dept, :region, 'FR', :source, :source_url, :lead_kind, false, :quality_score_new
                     )
+                    ON CONFLICT (organization_id, LOWER(company_name), LOWER(COALESCE(city, '')))
+                    DO UPDATE SET
+                        is_duplicate = true,
+                        quality_score = :quality_score_dup,
+                        extraction_job_id = COALESCE(leads.extraction_job_id, :job_id),
+                        updated_at = NOW()
+                    RETURNING id, (xmax = 0) AS inserted
                 """),
                 {
                     "id": lead_id,
@@ -1078,10 +1104,19 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                     "source": source,
                     "source_url": scraped.source_url or None,
                     "lead_kind": detected_lead_kind,
-                    "is_dup": is_duplicate,
-                    "quality_score": quality_score,
+                    "quality_score_new": quality_score_new,
+                    "quality_score_dup": quality_score_dup,
                 },
             )
+            row = result.first()
+            is_new = row.inserted if row else False
+            lead_id = str(row.id) if row else lead_id
+            is_duplicate = not is_new
+
+            if is_duplicate:
+                leads_duplicate += 1
+            else:
+                leads_new += 1
 
             # Insert emails
             for email in scraped.emails:
@@ -1300,4 +1335,7 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
             db.rollback()
         raise
     finally:
-        db.close()
+        try:
+            db.close()
+        except Exception as close_exc:
+            logger.warning("Error closing DB session for job %s: %s", job_id, close_exc)

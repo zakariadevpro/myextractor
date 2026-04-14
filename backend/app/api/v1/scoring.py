@@ -54,12 +54,18 @@ async def recompute_scoring(
     current_user: User = Depends(get_current_manager),
     db: AsyncSession = Depends(get_db),
 ):
-    scored = await ScoringService(db).rescore_all(current_user.organization_id)
+    from app.tasks.celery_app import celery_app
+
+    celery_app.send_task(
+        "app.tasks.cleaning_tasks.rescore_all_leads",
+        args=[str(current_user.organization_id)],
+        queue="cleaning",
+    )
     await AuditLogService(db).log(
         action="scoring.recompute",
         organization_id=current_user.organization_id,
         actor_user_id=current_user.id,
         resource_type="lead",
-        details={"rescored": scored},
+        details={"status": "queued"},
     )
-    return ScoringRecomputeResponse(scored=scored)
+    return ScoringRecomputeResponse(scored=0, status="queued")

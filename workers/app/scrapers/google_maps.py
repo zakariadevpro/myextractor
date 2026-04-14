@@ -187,10 +187,10 @@ class GoogleMapsScraper(BaseScraper):
         try:
             if self.browser:
                 await self.browser.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Google Maps browser close failed: %s", e)
         try:
             if self.playwright:
                 await self.playwright.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Google Maps playwright stop failed: %s", e)

@@ -1,8 +1,12 @@
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.extraction import ExtractionJob
 from app.models.user import User
 from app.schemas.extraction import ExtractionCreate
+
+logger = logging.getLogger(__name__)
 
 
 class ExtractionService:
@@ -52,19 +56,25 @@ class ExtractionService:
         self.db.add(job)
         await self.db.flush()
 
-        # Dispatch to Celery worker
+        # Store dispatch info — actual Celery send happens after commit via dispatch_job()
+        self._pending_job_id = str(job.id)
+        self._pending_target_kind = data.target_kind
+
+        return job
+
+    def dispatch_job(self):
+        """Send the pending job to Celery. Must be called after DB commit."""
         try:
             from app.tasks.celery_app import celery_app
 
             celery_app.send_task(
                 "workers.tasks.scrape_tasks.execute_scraping",
-                args=[str(job.id), data.target_kind],
+                args=[self._pending_job_id, self._pending_target_kind],
                 queue="scraping",
             )
-        except Exception:
-            # If Celery is not available, mark as failed
-            job.status = "failed"
-            job.error_message = "Task queue unavailable"
-            await self.db.flush()
-
-        return job
+        except Exception as e:
+            logger.error(
+                "Failed to dispatch extraction job %s to Celery: %s",
+                self._pending_job_id, e,
+            )
+            raise

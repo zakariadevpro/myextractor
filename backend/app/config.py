@@ -65,6 +65,19 @@ class Settings(BaseSettings):
     meta_webhook_verify_token: str = ""
     meta_access_token: str = ""
 
+    @field_validator("jwt_secret_key", mode="after")
+    @classmethod
+    def check_jwt_secret(cls, value, info):
+        env = info.data.get("app_env", "development")
+        if env not in {"development", "dev", "test"} and value == "dev-secret-key-change-me":
+            raise ValueError(
+                "JWT_SECRET_KEY must be changed from default in production. "
+                "Set JWT_SECRET_KEY environment variable to a strong random secret (>=32 chars)."
+            )
+        if env not in {"development", "dev", "test"} and len(value) < 32:
+            raise ValueError("JWT_SECRET_KEY must be at least 32 characters in production.")
+        return value
+
     @field_validator("debug", mode="before")
     @classmethod
     def parse_debug(cls, value):

@@ -27,4 +27,5 @@ class ScoringProfileUpdate(BaseModel):
 
 
 class ScoringRecomputeResponse(BaseModel):
-    scored: int
+    scored: int = 0
+    status: str = "completed"

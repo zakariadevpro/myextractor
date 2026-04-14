@@ -326,10 +326,10 @@ class PagesJaunesScraper(BaseScraper):
         try:
             if self.browser:
                 await self.browser.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Pages Jaunes browser close failed: %s", e)
         try:
             if self.playwright:
                 await self.playwright.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Pages Jaunes playwright stop failed: %s", e)

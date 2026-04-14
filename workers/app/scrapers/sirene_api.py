@@ -128,6 +128,16 @@ class SireneApiScraper(BaseScraper):
             "User-Agent": pick_user_agent(),
             "Accept": "application/json",
         }
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=30.0,
+                headers=self._default_headers,
+                proxy=proxy_pool.next_proxy_url(),
+            )
+        return self._client
 
     async def search(
         self,
@@ -188,19 +198,14 @@ class SireneApiScraper(BaseScraper):
         return leads
 
     async def _fetch_page(self, params: dict) -> dict:
-        proxy_url = proxy_pool.next_proxy_url()
-        async with httpx.AsyncClient(
-            timeout=30.0,
-            headers=self._default_headers,
-            proxy=proxy_url,
-        ) as client:
-            response = await client.get(BASE_URL, params=params)
-            if response.status_code in {429, 500, 502, 503, 504}:
-                raise RuntimeError(
-                    f"Retryable Sirene status code: {response.status_code}"
-                )
-            response.raise_for_status()
-            return response.json()
+        client = await self._get_client()
+        response = await client.get(BASE_URL, params=params)
+        if response.status_code in {429, 500, 502, 503, 504}:
+            raise RuntimeError(
+                f"Retryable Sirene status code: {response.status_code}"
+            )
+        response.raise_for_status()
+        return response.json()
 
     def _parse_company(self, company: dict) -> ScrapedLead | None:
         """Parse a company from Sirene API response into a ScrapedLead."""
@@ -269,4 +274,9 @@ class SireneApiScraper(BaseScraper):
             return None
 
     async def close(self):
-        return None
+        if self._client:
+            try:
+                await self._client.aclose()
+            except Exception as e:
+                logger.warning("Failed to close SIRENE httpx client: %s", e)
+            self._client = None

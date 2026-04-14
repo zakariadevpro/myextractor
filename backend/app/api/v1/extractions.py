@@ -46,6 +46,17 @@ async def create_extraction(
             "max_leads": data.max_leads,
         },
     )
+    # Commit first so the worker can find the job in DB
+    await db.commit()
+    # Now dispatch to Celery (job is visible in DB)
+    try:
+        service.dispatch_job()
+    except Exception:
+        job.status = "failed"
+        job.error_message = "Failed to dispatch scraping task to worker queue"
+        await db.commit()
+        from fastapi import HTTPException
+        raise HTTPException(status_code=502, detail="Scraping task could not be dispatched")
     return ExtractionResponse.model_validate(job)
 
 

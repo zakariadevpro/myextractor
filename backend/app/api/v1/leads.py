@@ -686,7 +686,15 @@ async def intake_b2c_csv(
     if not has_full_name_mapping and not has_split_name_mapping:
         raise BadRequestError("Mapping requires full_name or first_name + last_name")
 
-    content_bytes = await file.read()
+    MAX_CSV_SIZE = 10 * 1024 * 1024  # 10 MB
+    chunks = []
+    total_size = 0
+    while chunk := await file.read(64 * 1024):
+        total_size += len(chunk)
+        if total_size > MAX_CSV_SIZE:
+            raise BadRequestError(f"CSV file too large (max {MAX_CSV_SIZE // (1024 * 1024)} MB)")
+        chunks.append(chunk)
+    content_bytes = b"".join(chunks)
     if not content_bytes:
         raise BadRequestError("CSV file is empty")
 

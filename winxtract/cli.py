@@ -3,6 +3,7 @@ import json
 import time
 import traceback
 from datetime import datetime, timezone
+from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 

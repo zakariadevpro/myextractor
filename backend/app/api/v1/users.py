@@ -270,7 +270,8 @@ async def create_user(
         resource_id=str(user.id),
         details={"role": user.role, "email": user.email},
     )
-    return UserCreateResponse(
+    from fastapi.responses import JSONResponse
+    response_data = UserCreateResponse(
         id=user.id,
         email=user.email,
         first_name=user.first_name,
@@ -280,6 +281,10 @@ async def create_user(
         organization_id=user.organization_id,
         created_at=user.created_at,
         temporary_password=temp_password,
+    )
+    return JSONResponse(
+        content=response_data.model_dump(mode="json"),
+        headers={"Cache-Control": "no-store"},
     )
 
 
