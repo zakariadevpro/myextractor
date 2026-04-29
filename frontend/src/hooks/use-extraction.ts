@@ -93,3 +93,31 @@ export function useCancelExtraction() {
     },
   });
 }
+
+export function useDeleteExtraction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      deleteLeads,
+    }: {
+      id: string;
+      deleteLeads: boolean;
+    }) => {
+      const response = await apiClient.delete<{ message: string }>(
+        `/extractions/${id}?delete_leads=${deleteLeads ? "true" : "false"}`
+      );
+      return response.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["extractions"] });
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      toast.success(data.message || "Extraction supprimee.");
+    },
+    onError: () => {
+      toast.error("Impossible de supprimer cette extraction.");
+    },
+  });
+}

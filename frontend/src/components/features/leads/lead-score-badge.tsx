@@ -8,15 +8,15 @@ export function LeadScoreBadge({ score }: LeadScoreBadgeProps) {
   let variant: "success" | "warning" | "danger";
   let label: string;
 
-  if (score > 70) {
+  if (score >= 70) {
     variant = "success";
-    label = "Excellent";
+    label = "Warm";
   } else if (score >= 40) {
     variant = "warning";
-    label = "Moyen";
+    label = "Tiede";
   } else {
     variant = "danger";
-    label = "Faible";
+    label = "Froid";
   }
 
   return (

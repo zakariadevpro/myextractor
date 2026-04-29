@@ -28,7 +28,10 @@ export interface AuditSummary {
 export interface AuditLog {
   id: string;
   organization_id: string | null;
+  organization_name: string | null;
   actor_user_id: string | null;
+  actor_name: string | null;
+  actor_email: string | null;
   action: string;
   resource_type: string;
   resource_id: string | null;

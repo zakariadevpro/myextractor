@@ -4,5 +4,17 @@ services:
       NODE_ENV: development
       NODE_OPTIONS: --max-old-space-size=2048
       NEXT_TELEMETRY_DISABLED: "1"
+      # Force polling: Windows host -> Linux container bind mounts don't
+      # propagate inotify events, so HMR misses file changes without this.
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
     command: npm run dev -- -p 5173
+
+  celery-worker:
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"
+    command: >
+      sh -lc "pip install --quiet watchdog &&
+      watchmedo auto-restart --directory=/app/app --pattern='*.py' --recursive
+      -- celery -A app.celery_app worker --loglevel=info --concurrency=2 -Q scraping,cleaning,scoring"
 

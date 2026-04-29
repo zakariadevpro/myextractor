@@ -1,13 +1,14 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.exceptions import BadRequestError, NotFoundError
 from app.db.session import get_db
 from app.models.extraction import ExtractionJob
+from app.models.lead import Lead
 from app.models.user import User
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.extraction import ExtractionCreate, ExtractionResponse
@@ -148,3 +149,80 @@ async def cancel_extraction(
         resource_id=str(job.id),
     )
     return MessageResponse(message="Extraction job cancelled")
+
+
+@router.delete("/{job_id}", response_model=MessageResponse)
+async def delete_extraction(
+    job_id: uuid.UUID,
+    delete_leads: bool = Query(
+        False,
+        description="If true, also delete all leads attached to this extraction job.",
+    ),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    perm_service = PermissionService(db)
+    await perm_service.require_user_permission(current_user, "extraction.cancel")
+    if delete_leads:
+        await perm_service.require_user_permission(current_user, "leads.manage")
+
+    result = await db.execute(
+        select(ExtractionJob).where(
+            ExtractionJob.id == job_id,
+            ExtractionJob.organization_id == current_user.organization_id,
+        )
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise NotFoundError("Extraction job not found")
+    if job.status in ("pending", "running"):
+        raise BadRequestError(
+            "Annule ce job avant de le supprimer (status pending/running)."
+        )
+
+    leads_deleted = 0
+    if delete_leads:
+        leads_q = await db.execute(
+            select(func.count())
+            .select_from(Lead)
+            .where(
+                Lead.extraction_job_id == job_id,
+                Lead.organization_id == current_user.organization_id,
+            )
+        )
+        leads_deleted = int(leads_q.scalar() or 0)
+        await db.execute(
+            delete(Lead).where(
+                Lead.extraction_job_id == job_id,
+                Lead.organization_id == current_user.organization_id,
+            )
+        )
+    else:
+        # Detach surviving leads so the FK doesn't block the job delete.
+        await db.execute(
+            update(Lead)
+            .where(
+                Lead.extraction_job_id == job_id,
+                Lead.organization_id == current_user.organization_id,
+            )
+            .values(extraction_job_id=None)
+        )
+
+    job_id_str = str(job.id)
+    await db.delete(job)
+    await db.flush()
+    await AuditLogService(db).log(
+        action="extraction.delete",
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        resource_type="extraction_job",
+        resource_id=job_id_str,
+        details={
+            "delete_leads": delete_leads,
+            "leads_deleted": leads_deleted,
+        },
+    )
+    suffix = (
+        f" et {leads_deleted} lead(s) supprime(s)" if delete_leads else " (leads conserves)"
+    )
+    return MessageResponse(message=f"Extraction supprimee{suffix}.")

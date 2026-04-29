@@ -18,6 +18,7 @@ export function useLeads(filters: LeadFilters = {}) {
     queryKey: ["leads", filters],
     queryFn: async () => {
       const params = new URLSearchParams();
+      if (filters.extraction_job_id) params.set("extraction_job_id", filters.extraction_job_id);
       if (filters.search) params.set("search", filters.search);
       if (filters.lead_kind) params.set("lead_kind", filters.lead_kind);
       if (filters.sector) params.set("sector", filters.sector);
@@ -53,6 +54,37 @@ export function useLead(id: string) {
     queryKey: ["lead", id],
     queryFn: async () => {
       const response = await apiClient.get<Lead>(`/leads/${id}`);
+      return response.data;
+    },
+    enabled: !!id,
+  });
+}
+
+export interface LeadScoreBreakdownItem {
+  label: string;
+  key: string;
+  points: number;
+  applied: boolean;
+  detail: string | null;
+}
+
+export interface LeadScoreBreakdown {
+  lead_id: string;
+  stored_score: number;
+  computed_score: number;
+  raw_total: number;
+  high_threshold: number;
+  medium_threshold: number;
+  items: LeadScoreBreakdownItem[];
+}
+
+export function useLeadScoreBreakdown(id: string) {
+  return useQuery({
+    queryKey: ["lead", "score-breakdown", id],
+    queryFn: async () => {
+      const response = await apiClient.get<LeadScoreBreakdown>(
+        `/leads/${id}/score-breakdown`,
+      );
       return response.data;
     },
     enabled: !!id,
@@ -128,6 +160,7 @@ export function useExportLeads() {
       format?: "csv" | "xlsx";
     }) => {
       const params = new URLSearchParams();
+      if (filters.extraction_job_id) params.set("extraction_job_id", filters.extraction_job_id);
       if (filters.search) params.set("search", filters.search);
       if (filters.lead_kind) params.set("lead_kind", filters.lead_kind);
       if (filters.sector) params.set("sector", filters.sector);

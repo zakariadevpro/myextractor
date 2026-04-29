@@ -50,12 +50,26 @@ export default function BillingPage() {
     }
   };
 
-  const periodEnd = currentSubscription?.current_period_end
-    ? new Date(currentSubscription.current_period_end).toLocaleDateString("fr-FR")
-    : "N/A";
-  const periodStart = currentSubscription?.current_period_start
-    ? new Date(currentSubscription.current_period_start).toLocaleDateString("fr-FR")
-    : "N/A";
+  // Backend computes usage on the calendar month, so when the subscription
+  // has no Stripe-issued period (free plan, dev env...), default to that.
+  const fallbackStart = (() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  })();
+  const fallbackEnd = (() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  })();
+  const periodStart = (
+    currentSubscription?.current_period_start
+      ? new Date(currentSubscription.current_period_start)
+      : fallbackStart
+  ).toLocaleDateString("fr-FR");
+  const periodEnd = (
+    currentSubscription?.current_period_end
+      ? new Date(currentSubscription.current_period_end)
+      : fallbackEnd
+  ).toLocaleDateString("fr-FR");
 
   return (
     <div className="space-y-6">

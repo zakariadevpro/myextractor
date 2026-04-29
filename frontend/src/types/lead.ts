@@ -35,9 +35,11 @@ export interface Lead {
   extraction_job_id: string;
   organization_id: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface LeadFilters {
+  extraction_job_id?: string;
   lead_kind?: "b2b" | "b2c";
   search?: string;
   sector?: string;

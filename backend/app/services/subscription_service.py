@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import stripe
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -127,24 +127,51 @@ class SubscriptionService:
         if sub and sub.plan:
             max_leads = sub.plan.max_leads_per_month
 
-        # Get current period usage
         now = datetime.now(timezone.utc)
         period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        usage_result = await self.db.execute(
-            select(UsageRecord).where(
-                UsageRecord.organization_id == org_id,
-                UsageRecord.period_start >= period_start,
+
+        # Count actual leads created in the current month. This is the source
+        # of truth: the legacy UsageRecord table was never incremented anywhere.
+        from app.models.audit_log import AuditLog
+        from app.models.lead import Lead
+
+        leads_extracted_q = (
+            select(func.count())
+            .select_from(Lead)
+            .where(
+                Lead.organization_id == org_id,
+                Lead.created_at >= period_start,
             )
         )
-        usage = usage_result.scalar_one_or_none()
+        leads_extracted = (await self.db.execute(leads_extracted_q)).scalar() or 0
 
-        leads_extracted = usage.leads_extracted if usage else 0
-        leads_exported = usage.leads_exported if usage else 0
+        # Exports: count audit log entries of action lead.export this month.
+        exports_q = (
+            select(func.count())
+            .select_from(AuditLog)
+            .where(
+                AuditLog.organization_id == org_id,
+                AuditLog.action.in_(("lead.export", "leads.export")),
+                AuditLog.created_at >= period_start,
+            )
+        )
+        leads_exported = (await self.db.execute(exports_q)).scalar() or 0
+
+        # Fallback: also include any legacy UsageRecord row for this period.
+        legacy_q = select(UsageRecord).where(
+            UsageRecord.organization_id == org_id,
+            UsageRecord.period_start >= period_start,
+        )
+        legacy = (await self.db.execute(legacy_q)).scalar_one_or_none()
+        if legacy:
+            leads_extracted = max(leads_extracted, legacy.leads_extracted or 0)
+            leads_exported = max(leads_exported, legacy.leads_exported or 0)
+
         pct = (leads_extracted / max_leads * 100) if max_leads > 0 else 0
 
         return UsageResponse(
-            leads_extracted=leads_extracted,
-            leads_exported=leads_exported,
+            leads_extracted=int(leads_extracted),
+            leads_exported=int(leads_exported),
             max_leads_per_month=max_leads,
             usage_percentage=round(pct, 1),
         )

@@ -19,15 +19,15 @@ export default function ScoringPage() {
   const recomputeScoring = useRecomputeScoring();
 
   const [name, setName] = useState("default");
-  const [highThreshold, setHighThreshold] = useState("80");
-  const [mediumThreshold, setMediumThreshold] = useState("55");
+  const [highThreshold, setHighThreshold] = useState("70");
+  const [mediumThreshold, setMediumThreshold] = useState("40");
   const [weightsText, setWeightsText] = useState("{}");
 
   useEffect(() => {
     if (!profile) return;
     setName(profile.name || "default");
-    setHighThreshold(String(profile.high_threshold ?? 80));
-    setMediumThreshold(String(profile.medium_threshold ?? 55));
+    setHighThreshold(String(profile.high_threshold ?? 70));
+    setMediumThreshold(String(profile.medium_threshold ?? 40));
     setWeightsText(JSON.stringify(profile.weights ?? {}, null, 2));
   }, [profile]);
 
@@ -95,7 +95,7 @@ export default function ScoringPage() {
               onChange={(event) => setName(event.target.value)}
             />
             <Input
-              label="Seuil Hot"
+              label="Seuil Warm (>=)"
               type="number"
               min={1}
               max={100}
@@ -103,7 +103,7 @@ export default function ScoringPage() {
               onChange={(event) => setHighThreshold(event.target.value)}
             />
             <Input
-              label="Seuil Warm"
+              label="Seuil Tiede (>=)"
               type="number"
               min={0}
               max={99}

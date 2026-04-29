@@ -46,6 +46,7 @@ class LeadResponse(BaseModel):
     emails: list[LeadEmailSchema] = []
     phones: list[LeadPhoneSchema] = []
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -62,6 +63,7 @@ class LeadUpdate(BaseModel):
 class LeadFilters(BaseModel):
     min_score: int | None = None
     max_score: int | None = None
+    extraction_job_id: uuid.UUID | None = None
     sector: str | None = None
     city: str | None = None
     department: str | None = None

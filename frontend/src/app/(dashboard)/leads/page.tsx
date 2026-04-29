@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { CircleDot, Download, Filter, Layers, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { format } from "date-fns";
+import { fr } from "date-fns/locale";
+import { CircleDot, Download, Filter, Layers, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -16,6 +18,7 @@ import {
   useRemoveDuplicates,
   useSuggestedSegments,
 } from "@/hooks/use-leads";
+import { useExtractions } from "@/hooks/use-extraction";
 import { useAuth } from "@/hooks/use-auth";
 import { hasMinimumRole } from "@/lib/authz";
 import type { LeadFilters } from "@/types/lead";
@@ -25,6 +28,7 @@ export default function LeadsPage() {
   const [filters, setFilters] = useState<LeadFilters>({
     page: 1,
     page_size: 20,
+    ordering: "-updated_at",
   });
   const canManageLeads = hasMinimumRole(user?.role, "manager");
 
@@ -32,6 +36,45 @@ export default function LeadsPage() {
   const { data: suggestedSegments } = useSuggestedSegments();
   const exportMutation = useExportLeads();
   const removeDuplicatesMutation = useRemoveDuplicates();
+  const { data: extractionsData } = useExtractions({
+    page: 1,
+    page_size: 50,
+    ordering: "-created_at",
+  });
+
+  const activeExtraction = useMemo(() => {
+    if (!filters.extraction_job_id) return null;
+    return (
+      extractionsData?.items.find((j) => j.id === filters.extraction_job_id) ??
+      null
+    );
+  }, [extractionsData, filters.extraction_job_id]);
+
+  const clearExtractionFilter = () => {
+    setFilters((prev) => {
+      const next = { ...prev };
+      delete next.extraction_job_id;
+      next.page = 1;
+      return next;
+    });
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("extraction_job_id");
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
+
+  useEffect(() => {
+    const extractionJobId = new URLSearchParams(window.location.search).get("extraction_job_id");
+    if (extractionJobId) {
+      setFilters((prev) => ({
+        ...prev,
+        extraction_job_id: extractionJobId,
+        page: 1,
+        ordering: "-updated_at",
+      }));
+    }
+  }, []);
 
   const handleExport = async () => {
     try {
@@ -88,6 +131,7 @@ export default function LeadsPage() {
             ) : (
               <Badge variant="secondary">Lecture seule</Badge>
             )}
+            {filters.extraction_job_id && <Badge variant="outline">Extraction filtree</Badge>}
           </>
         }
         actions={
@@ -127,9 +171,9 @@ export default function LeadsPage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          label="Leads Affiches"
-          value={leads.length}
-          helper="Resultat de la page courante"
+          label="Total Leads"
+          value={data?.total ?? 0}
+          helper={`${leads.length} affiches sur cette page`}
           icon={<Layers className="h-4 w-4" />}
         />
         <MetricCard
@@ -159,15 +203,57 @@ export default function LeadsPage() {
             ...segmentFilters,
             page: 1,
             page_size: 20,
+            ordering: "-updated_at",
           })
         }
       />
+
+      {/* Active extraction filter banner */}
+      {filters.extraction_job_id && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Filter className="h-4 w-4 text-primary" />
+            <span className="font-medium text-slate-900">
+              Filtre extraction actif
+            </span>
+            {activeExtraction ? (
+              <span className="text-muted-foreground">
+                {activeExtraction.created_at
+                  ? format(new Date(activeExtraction.created_at), "dd MMM yyyy HH:mm", { locale: fr })
+                  : ""}
+                {" - "}
+                {(activeExtraction.keywords || []).slice(0, 3).join(", ") || "-"}
+                {activeExtraction.city ? ` / ${activeExtraction.city}` : ""}
+                {" "}
+                ({activeExtraction.leads_found ?? 0} leads)
+              </span>
+            ) : (
+              <span className="text-muted-foreground">
+                ID: {filters.extraction_job_id.slice(0, 8)}...
+              </span>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={clearExtractionFilter}
+          >
+            <X className="h-3.5 w-3.5" />
+            Retirer le filtre
+          </Button>
+        </div>
+      )}
 
       {/* Filters */}
       <LeadFiltersBar filters={filters} onFiltersChange={setFilters} />
 
       {/* Table */}
-      <LeadTable leads={data?.items ?? []} isLoading={isLoading} />
+      <LeadTable
+        leads={data?.items ?? []}
+        isLoading={isLoading}
+        canDelete={canManageLeads}
+      />
 
       {/* Pagination */}
       {totalPages > 1 && (

@@ -5,7 +5,7 @@ from playwright.async_api import Page, async_playwright
 
 from app.browser.anti_detect import apply_stealth
 from app.config import settings
-from app.parsers.contact_parser import extract_emails, extract_phones
+from app.parsers.contact_parser import extract_emails
 from app.scrapers.base import BaseScraper, ScrapedLead
 from app.scrapers.proxy_pool import proxy_pool
 from app.scrapers.resilience import jitter_sleep, pick_user_agent, run_with_retries
@@ -168,14 +168,19 @@ class GoogleMapsScraper(BaseScraper):
             if await website_el.count() > 0:
                 lead.website = (await website_el.first.text_content() or "").strip()
 
-            # Try to extract additional emails/phones from page content
-            page_content = await page.content()
-            extra_emails = extract_emails(page_content)
-            extra_phones = extract_phones(page_content)
-            if extra_emails:
-                lead.emails = list(set(lead.emails + extra_emails))
-            if extra_phones and not lead.phones:
-                lead.phones = list(set(extra_phones))
+            # Scope additional email extraction to the active place panel only.
+            # Why: page.content() includes the sidebar/feed for other businesses,
+            # so a regex on the full page leaked phones/emails between leads.
+            panel = page.locator('[role="main"]').first
+            if await panel.count() > 0:
+                try:
+                    panel_html = await panel.inner_html()
+                except Exception:
+                    panel_html = ""
+                if panel_html:
+                    extra_emails = extract_emails(panel_html)
+                    if extra_emails:
+                        lead.emails = list(set(lead.emails + extra_emails))
 
             return lead
 

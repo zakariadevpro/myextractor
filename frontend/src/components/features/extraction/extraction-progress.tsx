@@ -2,19 +2,28 @@
 
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
+import Link from "next/link";
 import {
   CheckCircle2,
   XCircle,
   Clock,
   Loader2,
   Ban,
+  ExternalLink,
+  Trash2,
   Users,
 } from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useCancelExtraction } from "@/hooks/use-extraction";
+import {
+  useCancelExtraction,
+  useDeleteExtraction,
+} from "@/hooks/use-extraction";
+import { useAuth } from "@/hooks/use-auth";
+import { hasMinimumRole } from "@/lib/authz";
 import { SOURCES } from "@/lib/constants";
 import type { ExtractionJob, ExtractionStatus } from "@/types/extraction";
 
@@ -60,9 +69,25 @@ const statusConfig: Record<
 
 export function ExtractionProgress({ job }: ExtractionProgressProps) {
   const cancelMutation = useCancelExtraction();
+  const deleteMutation = useDeleteExtraction();
+  const { user } = useAuth();
+  const canManageLeads = hasMinimumRole(user?.role, "admin");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleteLeads, setDeleteLeads] = useState(true);
   const config = statusConfig[job.status];
 
   const progressPercent = job.progress ?? 0;
+  const canDelete =
+    job.status === "completed" ||
+    job.status === "failed" ||
+    job.status === "cancelled";
+
+  const handleDelete = () => {
+    deleteMutation.mutate(
+      { id: job.id, deleteLeads },
+      { onSuccess: () => setConfirmOpen(false) },
+    );
+  };
 
   return (
     <Card className="card-hover">
@@ -130,19 +155,91 @@ export function ExtractionProgress({ job }: ExtractionProgressProps) {
             )}
           </div>
 
-          {/* Cancel button */}
-          {(job.status === "pending" || job.status === "running") && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => cancelMutation.mutate(job.id)}
-              isLoading={cancelMutation.isPending}
-              className="text-slate-400 hover:text-danger"
-            >
-              <Ban className="h-4 w-4" />
-            </Button>
-          )}
+          {/* Action icons */}
+          <div className="flex shrink-0 items-center gap-1 self-start">
+            {job.status === "completed" && (
+              <Link
+                href={`/leads?extraction_job_id=${job.id}`}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-primary"
+                title="Voir les leads de cette extraction"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </Link>
+            )}
+            {(job.status === "pending" || job.status === "running") && (
+              <button
+                type="button"
+                onClick={() => cancelMutation.mutate(job.id)}
+                disabled={cancelMutation.isPending}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-danger disabled:opacity-50"
+                title="Annuler l'extraction"
+              >
+                <Ban className="h-4 w-4" />
+              </button>
+            )}
+            {canManageLeads && canDelete && (
+              <button
+                type="button"
+                onClick={() => {
+                  if ((job.leads_found ?? 0) === 0) {
+                    deleteMutation.mutate({ id: job.id, deleteLeads: false });
+                  } else {
+                    setConfirmOpen(true);
+                  }
+                }}
+                disabled={deleteMutation.isPending}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-danger disabled:opacity-50"
+                title="Supprimer cette extraction"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
+
+        {confirmOpen && (
+          <div className="mt-4 rounded-lg border border-danger/30 bg-danger/5 p-4">
+            <p className="text-sm font-medium text-slate-900">
+              Supprimer cette extraction ?
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {job.leads_found} lead(s) ont ete trouves par ce job.
+            </p>
+            <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={deleteLeads}
+                onChange={(e) => setDeleteLeads(e.target.checked)}
+                className="mt-1"
+              />
+              <span>
+                Supprimer aussi les leads associes a cette extraction
+                <span className="block text-xs text-muted-foreground">
+                  Decoche pour conserver les leads (le rattachement a
+                  l&apos;extraction sera retire).
+                </span>
+              </span>
+            </label>
+            <div className="mt-3 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmOpen(false)}
+                disabled={deleteMutation.isPending}
+              >
+                Annuler
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDelete}
+                isLoading={deleteMutation.isPending}
+              >
+                Supprimer
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -5,9 +5,12 @@ import re
 import time
 import unicodedata
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+import phonenumbers
+from phonenumbers import NumberParseException
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -17,6 +20,7 @@ from app.scrapers.base import ScrapedLead
 from app.scrapers.google_maps import GoogleMapsScraper
 from app.scrapers.pages_jaunes import PagesJaunesScraper
 from app.scrapers.sirene_api import SireneApiScraper
+from app.scrapers.website_contact import enrich_b2b_leads_with_website_emails
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +136,8 @@ DEFAULT_SCORING_WEIGHTS = {
     "siren": 12,
     "naf_code": 6,
     "fallback_source_bonus": 4,
+    # Trio essentiel: adresse + telephone + email = "warm lead".
+    "core_contact_bonus": 20,
     "duplicate_penalty": 25,
 }
 
@@ -204,6 +210,67 @@ def _clean_email_list(emails: list[str]) -> list[str]:
     return cleaned[:5]
 
 
+_PHONE_BLACKLIST = {
+    "+33000000000",
+    "+33111111111",
+    "+33222222222",
+    "+33333333333",
+    "+33444444444",
+    "+33555555555",
+    "+33666666666",
+    "+33777777777",
+    "+33888888888",
+    "+33999999999",
+    "+33123456789",
+}
+
+
+def _is_placeholder_phone(normalized: str) -> bool:
+    """Detect obvious fake/placeholder French phone numbers.
+
+    Why: scrapers sometimes harvest tracker defaults like +33333333333 or
+    +33999999977 that pass loose regex matching but are clearly not real
+    contact data.
+    """
+    if not normalized:
+        return True
+    if normalized in _PHONE_BLACKLIST:
+        return True
+    digits = re.sub(r"\D", "", normalized)
+    if not digits:
+        return True
+    # 7+ identical consecutive digits anywhere → placeholder
+    if re.search(r"(\d)\1{6,}", digits):
+        return True
+    # Whole number made of only 1-2 unique digits → placeholder
+    unique = set(digits)
+    if len(unique) <= 2:
+        return True
+    # Very low-entropy patterns (one digit dominates >= 70%)
+    counts = Counter(digits)
+    most_common_count = counts.most_common(1)[0][1]
+    if most_common_count / len(digits) >= 0.7:
+        return True
+    return False
+
+
+def _validate_phone(raw: str) -> str | None:
+    """Return E.164 normalized phone if valid French number, else None."""
+    cleaned = re.sub(r"[^\d+]", "", (raw or "").strip())
+    if len(cleaned) < 10:
+        return None
+    try:
+        parsed = phonenumbers.parse(cleaned, "FR")
+    except NumberParseException:
+        return None
+    if not phonenumbers.is_valid_number(parsed):
+        return None
+    e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+    if _is_placeholder_phone(e164):
+        return None
+    return e164
+
+
 def _clean_phone_list(phones: list[str]) -> list[str]:
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -211,10 +278,10 @@ def _clean_phone_list(phones: list[str]) -> list[str]:
         value = (phone or "").strip()
         if not value:
             continue
-        key = re.sub(r"[^\d+]", "", value)
-        if len(key) < 10 or key in seen:
+        e164 = _validate_phone(value)
+        if not e164 or e164 in seen:
             continue
-        seen.add(key)
+        seen.add(e164)
         cleaned.append(value)
     return cleaned[:5]
 
@@ -387,6 +454,15 @@ def _compute_initial_quality(
         )
     if lead.address and lead.postal_code and lead.city:
         score += scoring_weights.get("address_3_fields", 10)
+    if (
+        lead.address
+        and lead.postal_code
+        and lead.city
+        and lead.phones
+        and lead.emails
+    ):
+        # Trio essentiel: adresse complete + telephone + email -> warm lead.
+        score += scoring_weights.get("core_contact_bonus", 20)
     if lead.siren:
         score += scoring_weights.get("siren", 12)
     if lead.naf_code:
@@ -728,6 +804,36 @@ async def _run_whiteextractor_search(
     return merged
 
 
+async def _enrich_selected_b2b_leads_with_website_emails(
+    selected_leads: list[tuple[ScrapedLead, str]],
+) -> dict[str, int]:
+    if not settings.website_email_enrichment_enabled:
+        return {"checked": 0, "enriched": 0, "emails_found": 0}
+
+    max_leads = max(0, settings.website_email_enrichment_max_leads)
+    b2b_leads_without_email = [
+        lead
+        for lead, detected_kind in selected_leads
+        if detected_kind == "b2b" and lead.website and not lead.emails
+    ][:max_leads]
+    if not b2b_leads_without_email:
+        return {"checked": 0, "enriched": 0, "emails_found": 0}
+
+    summary = await enrich_b2b_leads_with_website_emails(
+        b2b_leads_without_email,
+        max_pages_per_site=settings.website_email_enrichment_max_pages_per_site,
+        timeout_seconds=settings.website_email_enrichment_timeout_seconds,
+        concurrency=settings.website_email_enrichment_concurrency,
+    )
+    logger.info(
+        "Website email enrichment checked=%s enriched=%s emails_found=%s",
+        summary["checked"],
+        summary["enriched"],
+        summary["emails_found"],
+    )
+    return summary
+
+
 def _match_workflow_conditions(lead_row: dict, conditions: dict) -> bool:
     if not conditions:
         return True
@@ -956,7 +1062,14 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
         # Idempotency guard: if this is a retry, clean up leads from previous attempt
         if job["status"] == "running":
             existing_count = db.execute(
-                text("SELECT COUNT(*) FROM leads WHERE extraction_job_id = :id"),
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM leads
+                    WHERE extraction_job_id = CAST(:id AS uuid)
+                      AND is_duplicate = false
+                    """
+                ),
                 {"id": job_id},
             ).scalar() or 0
             if existing_count > 0:
@@ -965,15 +1078,33 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                     job_id, existing_count,
                 )
                 db.execute(
-                    text("DELETE FROM lead_phones WHERE lead_id IN (SELECT id FROM leads WHERE extraction_job_id = :id)"),
+                    text("""
+                        DELETE FROM lead_phones
+                        WHERE lead_id IN (
+                            SELECT id FROM leads
+                            WHERE extraction_job_id = CAST(:id AS uuid)
+                              AND is_duplicate = false
+                        )
+                    """),
                     {"id": job_id},
                 )
                 db.execute(
-                    text("DELETE FROM lead_emails WHERE lead_id IN (SELECT id FROM leads WHERE extraction_job_id = :id)"),
+                    text("""
+                        DELETE FROM lead_emails
+                        WHERE lead_id IN (
+                            SELECT id FROM leads
+                            WHERE extraction_job_id = CAST(:id AS uuid)
+                              AND is_duplicate = false
+                        )
+                    """),
                     {"id": job_id},
                 )
                 db.execute(
-                    text("DELETE FROM leads WHERE extraction_job_id = :id"),
+                    text("""
+                        DELETE FROM leads
+                        WHERE extraction_job_id = CAST(:id AS uuid)
+                          AND is_duplicate = false
+                    """),
                     {"id": job_id},
                 )
                 db.commit()
@@ -1029,6 +1160,9 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
         )
         if len(selected_leads) > max_leads:
             selected_leads = selected_leads[:max_leads]
+        website_email_summary = _run_async(
+            _enrich_selected_b2b_leads_with_website_emails(selected_leads)
+        )
         leads_with_phone = sum(1 for lead, _ in selected_leads if lead.phones)
         leads_with_pro_email = sum(
             1 for lead, _ in selected_leads if _professional_email_count(lead) > 0
@@ -1083,7 +1217,17 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                     DO UPDATE SET
                         is_duplicate = true,
                         quality_score = :quality_score_dup,
-                        extraction_job_id = COALESCE(leads.extraction_job_id, :job_id),
+                        extraction_job_id = CAST(:job_id AS uuid),
+                        siren = COALESCE(leads.siren, EXCLUDED.siren),
+                        naf_code = COALESCE(leads.naf_code, EXCLUDED.naf_code),
+                        sector = COALESCE(leads.sector, EXCLUDED.sector),
+                        website = COALESCE(leads.website, EXCLUDED.website),
+                        address = COALESCE(leads.address, EXCLUDED.address),
+                        postal_code = COALESCE(leads.postal_code, EXCLUDED.postal_code),
+                        department = COALESCE(leads.department, EXCLUDED.department),
+                        region = COALESCE(leads.region, EXCLUDED.region),
+                        source_url = COALESCE(leads.source_url, EXCLUDED.source_url),
+                        lead_kind = COALESCE(NULLIF(leads.lead_kind, ''), EXCLUDED.lead_kind),
                         updated_at = NOW()
                     RETURNING id, (xmax = 0) AS inserted
                 """),
@@ -1123,13 +1267,25 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                 db.execute(
                     text("""
                         INSERT INTO lead_emails (id, lead_id, email, is_primary, is_valid)
-                        VALUES (:id, :lead_id, :email, :primary, :is_valid)
+                        SELECT
+                            CAST(:id AS uuid),
+                            CAST(:lead_id AS uuid),
+                            :email,
+                            NOT EXISTS (
+                                SELECT 1 FROM lead_emails
+                                WHERE lead_id = CAST(:lead_id AS uuid)
+                            ),
+                            :is_valid
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM lead_emails
+                            WHERE lead_id = CAST(:lead_id AS uuid)
+                              AND LOWER(email) = LOWER(:email)
+                        )
                     """),
                     {
                         "id": str(uuid.uuid4()),
                         "lead_id": lead_id,
                         "email": email,
-                        "primary": email == scraped.emails[0],
                         "is_valid": True,
                     },
                 )
@@ -1141,8 +1297,25 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                     text("""
                         INSERT INTO lead_phones (
                             id, lead_id, phone_raw, phone_normalized, phone_type, is_primary, is_valid
-                        ) VALUES (
-                            :id, :lead_id, :phone, :phone_normalized, :phone_type, :primary, :is_valid
+                        )
+                        SELECT
+                            CAST(:id AS uuid),
+                            CAST(:lead_id AS uuid),
+                            :phone,
+                            :phone_normalized,
+                            :phone_type,
+                            NOT EXISTS (
+                                SELECT 1 FROM lead_phones
+                                WHERE lead_id = CAST(:lead_id AS uuid)
+                            ),
+                            :is_valid
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM lead_phones
+                            WHERE lead_id = CAST(:lead_id AS uuid)
+                              AND (
+                                  (:phone_normalized IS NOT NULL AND phone_normalized = :phone_normalized)
+                                  OR phone_raw = :phone
+                              )
                         )
                     """),
                     {
@@ -1151,7 +1324,6 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                         "phone": phone,
                         "phone_normalized": phone_normalized,
                         "phone_type": _detect_phone_type(phone),
-                        "primary": phone == scraped.phones[0],
                         "is_valid": phone_normalized is not None,
                     },
                 )
@@ -1236,6 +1408,9 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                         "classified_b2b": filter_counts["class_b2b"],
                         "classified_b2c": filter_counts["class_b2c"],
                         "classified_unknown": filter_counts["class_unknown"],
+                        "website_email_checked": website_email_summary["checked"],
+                        "website_email_enriched": website_email_summary["enriched"],
+                        "website_emails_found": website_email_summary["emails_found"],
                         "with_phone": leads_with_phone,
                         "with_professional_email": leads_with_pro_email,
                         "leads_new": leads_new,

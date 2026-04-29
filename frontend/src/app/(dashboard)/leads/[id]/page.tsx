@@ -2,6 +2,7 @@
 
 import { use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -13,7 +14,9 @@ import {
   MapPin,
   Globe,
   Calendar,
+  Gauge,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +25,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { LeadScoreBadge } from "@/components/features/leads/lead-score-badge";
-import { useLead, useLeadConsent, useUpdateLeadConsent } from "@/hooks/use-leads";
+import {
+  useDeleteLead,
+  useLead,
+  useLeadConsent,
+  useLeadScoreBreakdown,
+  useUpdateLeadConsent,
+} from "@/hooks/use-leads";
 import { useAuth } from "@/hooks/use-auth";
 import { hasMinimumRole } from "@/lib/authz";
 import type {
@@ -78,11 +87,32 @@ export default function LeadDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const { user } = useAuth();
   const canEditConsent = hasMinimumRole(user?.role, "manager");
+  const canDeleteLead = hasMinimumRole(user?.role, "admin");
   const { data: lead, isLoading } = useLead(id);
   const { data: consent, isLoading: isConsentLoading } = useLeadConsent(id);
+  const { data: scoreBreakdown, isLoading: isScoreLoading } =
+    useLeadScoreBreakdown(id);
   const updateLeadConsent = useUpdateLeadConsent();
+  const deleteLeadMutation = useDeleteLead();
+
+  const handleDeleteLead = () => {
+    if (!lead) return;
+    if (typeof window === "undefined") return;
+    const confirmed = window.confirm(
+      `Supprimer definitivement le lead "${lead.company_name}" ?`,
+    );
+    if (!confirmed) return;
+    deleteLeadMutation.mutate(id, {
+      onSuccess: () => {
+        toast.success("Lead supprime.");
+        router.push("/leads");
+      },
+      onError: () => toast.error("Impossible de supprimer ce lead."),
+    });
+  };
   const [consentStatus, setConsentStatus] = useState<ConsentStatus>("unknown");
   const [consentScope, setConsentScope] = useState<ConsentScope>("all");
   const [lawfulBasis, setLawfulBasis] = useState<LawfulBasis>("consent");
@@ -186,6 +216,17 @@ export default function LeadDetailPage({
             {lead.siren && ` - SIREN: ${lead.siren}`}
           </p>
         </div>
+        {canDeleteLead && (
+          <Button
+            variant="outline"
+            className="gap-2 border-danger/40 text-danger hover:bg-danger/10"
+            onClick={handleDeleteLead}
+            isLoading={deleteLeadMutation.isPending}
+          >
+            <Trash2 className="h-4 w-4" />
+            Supprimer
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -463,6 +504,95 @@ export default function LeadDetailPage({
           </Card>
         </div>
       </div>
+
+      {/* Score breakdown (compact, en bas) */}
+      <details className="group rounded-lg border border-border bg-white">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-2.5 text-xs">
+          <span className="flex items-center gap-2 font-medium text-slate-700">
+            <Gauge className="h-3.5 w-3.5 text-slate-400" />
+            Decomposition du score
+            {scoreBreakdown && (
+              <Badge variant="outline" className="ml-1 px-1.5 py-0 text-[11px]">
+                {scoreBreakdown.computed_score}/100
+              </Badge>
+            )}
+            {scoreBreakdown &&
+              scoreBreakdown.stored_score !== scoreBreakdown.computed_score && (
+                <Badge variant="warning" className="px-1.5 py-0 text-[11px]">
+                  stocke: {scoreBreakdown.stored_score}
+                </Badge>
+              )}
+          </span>
+          <span className="text-[11px] text-muted-foreground group-open:hidden">
+            Voir le detail
+          </span>
+          <span className="hidden text-[11px] text-muted-foreground group-open:inline">
+            Masquer
+          </span>
+        </summary>
+        <div className="border-t border-border px-4 py-3">
+          {isScoreLoading ? (
+            <p className="text-xs text-muted-foreground">Chargement...</p>
+          ) : !scoreBreakdown ? (
+            <p className="text-xs text-muted-foreground">Detail indisponible.</p>
+          ) : (
+            <div className="space-y-2">
+              <div className="overflow-hidden rounded border border-border">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+                    <tr>
+                      <th className="px-2 py-1.5 text-left">Critere</th>
+                      <th className="px-2 py-1.5 text-left">Detail</th>
+                      <th className="px-2 py-1.5 text-right">Pts</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {scoreBreakdown.items.map((item, idx) => (
+                      <tr
+                        key={`${item.key}-${idx}`}
+                        className={item.applied ? "" : "text-slate-400"}
+                      >
+                        <td className="px-2 py-1">{item.label}</td>
+                        <td className="px-2 py-1 text-muted-foreground">
+                          {item.detail || "-"}
+                        </td>
+                        <td
+                          className={`px-2 py-1 text-right font-mono ${
+                            !item.applied
+                              ? ""
+                              : item.points < 0
+                                ? "text-danger"
+                                : "text-success"
+                          }`}
+                        >
+                          {item.applied
+                            ? `${item.points > 0 ? "+" : ""}${item.points}`
+                            : "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-slate-50 text-xs font-semibold">
+                    <tr>
+                      <td className="px-2 py-1.5" colSpan={2}>
+                        Total (clamp 0-100)
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono">
+                        {scoreBreakdown.computed_score}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Seuils: {">"} {scoreBreakdown.high_threshold} = Excellent,{" "}
+                {scoreBreakdown.medium_threshold}-{scoreBreakdown.high_threshold} =
+                Moyen, {"<"} {scoreBreakdown.medium_threshold} = Faible.
+              </p>
+            </div>
+          )}
+        </div>
+      </details>
     </div>
   );
 }

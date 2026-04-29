@@ -48,11 +48,15 @@ DEFAULT_SCORING_WEIGHTS: dict[str, int] = {
     "naf_code": 6,
     "premium_sector": 8,
     "fallback_source_bonus": 4,
+    # Trio essentiel: adresse + telephone + email = "warm lead".
+    # Ce sont les donnees principales qu'on cherche, donc gros bonus
+    # pour pousser ces leads dans le tier "warm" (ex-Excellent).
+    "core_contact_bonus": 20,
     "duplicate_penalty": 25,
     "no_contact_penalty": 12,
 }
-DEFAULT_HIGH_THRESHOLD = 80
-DEFAULT_MEDIUM_THRESHOLD = 55
+DEFAULT_HIGH_THRESHOLD = 70
+DEFAULT_MEDIUM_THRESHOLD = 40
 
 
 @dataclass
@@ -111,69 +115,221 @@ class ScoringService:
         return ScoringProfileConfig(high_threshold=high, medium_threshold=medium, weights=weights)
 
     def calculate_score(self, lead: Lead, weights: dict[str, int] | None = None) -> int:
-        """Calculate quality score 0-100 using contactability + data reliability signals."""
+        return self.calculate_score_breakdown(lead, weights)["score"]
+
+    def calculate_score_breakdown(
+        self, lead: Lead, weights: dict[str, int] | None = None
+    ) -> dict:
+        """Compute the score AND return the line-by-line breakdown.
+
+        Why: two leads can show the same primary email/phone in the table yet have
+        very different scores because the score depends on hidden fields (SIREN,
+        NAF, source, is_duplicate, mobile vs landline, email validity, etc.).
+        Returning the breakdown lets the UI explain the score to the user.
+        """
         scoring_weights = self.sanitize_weights(weights)
-        score = 0
+        items: list[dict] = []
+        raw_total = 0
 
-        # Contactability: email quality
-        has_valid_email = any(e.is_valid for e in lead.emails if e.is_valid is not None)
-        has_any_email = len(lead.emails) > 0
+        def add(label: str, key: str, applied: bool, detail: str | None = None) -> None:
+            nonlocal raw_total
+            points = scoring_weights.get(key, 0)
+            if applied:
+                raw_total += points
+            items.append(
+                {
+                    "label": label,
+                    "key": key,
+                    "points": points,
+                    "applied": applied,
+                    "detail": detail,
+                }
+            )
+
+        def add_signed(
+            label: str, points: int, applied: bool, detail: str | None = None,
+            key: str | None = None,
+        ) -> None:
+            nonlocal raw_total
+            if applied:
+                raw_total += points
+            items.append(
+                {
+                    "label": label,
+                    "key": key or label,
+                    "points": points,
+                    "applied": applied,
+                    "detail": detail,
+                }
+            )
+
+        # Email
+        emails = list(lead.emails)
+        has_any_email = len(emails) > 0
+        has_valid_email = any(e.is_valid for e in emails if e.is_valid is not None)
+        primary_email_value = emails[0].email if emails else None
         if has_valid_email:
-            score += scoring_weights["valid_email"]
-            if len(lead.emails) > 1:
-                score += scoring_weights["extra_email"]
+            add(
+                "Email valide",
+                "valid_email",
+                True,
+                detail=primary_email_value,
+            )
         elif has_any_email:
-            score += scoring_weights["any_email"]
+            add(
+                "Email present (non valide)",
+                "any_email",
+                True,
+                detail=primary_email_value,
+            )
+        else:
+            add("Aucun email", "valid_email", False)
 
-        # Contactability: phone quality
-        has_any_phone = len(lead.phones) > 0
-        has_valid_phone = any(p.is_valid is True for p in lead.phones)
+        if has_valid_email and len(emails) > 1:
+            add(
+                "Email supplementaire",
+                "extra_email",
+                True,
+                detail=f"{len(emails)} emails au total",
+            )
+
+        # Phone
+        phones = list(lead.phones)
+        has_any_phone = len(phones) > 0
+        has_valid_phone = any(p.is_valid is True for p in phones)
+        primary_phone_value = (
+            phones[0].phone_normalized or phones[0].phone_raw if phones else None
+        )
         if has_valid_phone:
-            score += scoring_weights["valid_phone"]
+            add("Telephone valide", "valid_phone", True, detail=primary_phone_value)
         elif has_any_phone:
-            score += scoring_weights["any_phone"]
+            add(
+                "Telephone present (non valide)",
+                "any_phone",
+                True,
+                detail=primary_phone_value,
+            )
+        else:
+            add("Aucun telephone", "valid_phone", False)
 
-        has_mobile = any(p.phone_type == "mobile" for p in lead.phones)
-        has_landline = any(p.phone_type == "landline" for p in lead.phones)
+        has_mobile = any(p.phone_type == "mobile" for p in phones)
+        has_landline = any(p.phone_type == "landline" for p in phones)
         if has_mobile:
-            score += scoring_weights["mobile_phone"]
+            add("Telephone mobile", "mobile_phone", True)
         if has_landline:
-            score += scoring_weights["landline_phone"]
+            add("Telephone fixe", "landline_phone", True)
 
-        # Company metadata coverage
+        # Website
         if lead.website:
-            score += scoring_weights["website"]
+            add("Site web", "website", True, detail=lead.website)
+        else:
+            add("Site web absent", "website", False)
 
+        # Address completeness
         address_fields = sum(
             1 for part in [lead.address, lead.postal_code, lead.city, lead.region] if part
         )
         if address_fields >= 3:
-            score += scoring_weights["address_3_fields"]
+            add(
+                "Adresse complete (>=3 champs)",
+                "address_3_fields",
+                True,
+                detail=f"{address_fields}/4 champs renseignes",
+            )
         elif address_fields == 2:
-            score += scoring_weights["address_2_fields"]
+            add("Adresse partielle (2 champs)", "address_2_fields", True)
+        else:
+            add(
+                "Adresse incomplete",
+                "address_3_fields",
+                False,
+                detail=f"{address_fields}/4 champs renseignes",
+            )
 
         # Official identifiers
-        if lead.siren:
-            score += scoring_weights["siren"]
-        if lead.naf_code:
-            score += scoring_weights["naf_code"]
+        add(
+            "SIREN",
+            "siren",
+            bool(lead.siren),
+            detail=lead.siren if lead.siren else None,
+        )
+        add(
+            "Code NAF",
+            "naf_code",
+            bool(lead.naf_code),
+            detail=lead.naf_code if lead.naf_code else None,
+        )
 
-        # Source reliability
+        # Source reliability (always applies, fallback if unknown)
         source_key = _normalize_token(lead.source)
-        score += SOURCE_RELIABILITY_BONUS.get(source_key, scoring_weights["fallback_source_bonus"])
+        source_points = SOURCE_RELIABILITY_BONUS.get(source_key)
+        if source_points is not None:
+            add_signed(
+                f"Source: {lead.source}",
+                source_points,
+                True,
+                detail="Bonus fiabilite source",
+                key="source_bonus",
+            )
+        else:
+            add_signed(
+                f"Source: {lead.source or 'inconnue'}",
+                scoring_weights["fallback_source_bonus"],
+                True,
+                detail="Bonus fallback (source non listee)",
+                key="fallback_source_bonus",
+            )
 
-        # Sector relevance
+        # Sector
         sector_key = _normalize_token(lead.sector)
-        if any(keyword in sector_key for keyword in PREMIUM_SECTORS):
-            score += scoring_weights["premium_sector"]
+        is_premium_sector = bool(
+            sector_key and any(keyword in sector_key for keyword in PREMIUM_SECTORS)
+        )
+        add(
+            "Secteur premium",
+            "premium_sector",
+            is_premium_sector,
+            detail=lead.sector if lead.sector else None,
+        )
 
-        # Penalties
+        # Trio essentiel: adresse + telephone + email -> "warm lead".
+        # Address must be substantively complete (>=3 fields), phone and email
+        # just need to be present. This is the prospect data we actually need.
+        is_warm = address_fields >= 3 and has_any_phone and has_any_email
+        add(
+            "Trio essentiel (adresse + tel + email) -> Warm",
+            "core_contact_bonus",
+            is_warm,
+            detail=(
+                "Lead qualifie warm" if is_warm
+                else "Manque au moins une donnee principale"
+            ),
+        )
+
+        # Penalties (negative)
         if lead.is_duplicate:
-            score -= scoring_weights["duplicate_penalty"]
+            add_signed(
+                "Doublon (penalite)",
+                -scoring_weights["duplicate_penalty"],
+                True,
+                detail="Lead marque comme doublon",
+                key="duplicate_penalty",
+            )
         if not has_any_email and not has_any_phone:
-            score -= scoring_weights["no_contact_penalty"]
+            add_signed(
+                "Aucun contact (penalite)",
+                -scoring_weights["no_contact_penalty"],
+                True,
+                detail="Ni email ni telephone",
+                key="no_contact_penalty",
+            )
 
-        return max(0, min(score, 100))
+        clamped = max(0, min(raw_total, 100))
+        return {
+            "score": clamped,
+            "raw_total": raw_total,
+            "items": items,
+        }
 
     async def score_lead(self, lead: Lead) -> int:
         """Score a single lead and update the database."""

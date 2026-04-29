@@ -11,14 +11,17 @@ import {
 } from "@tanstack/react-table";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { LeadScoreBadge } from "./lead-score-badge";
 import { Badge } from "@/components/ui/badge";
+import { useDeleteLead } from "@/hooks/use-leads";
 import type { Lead } from "@/types/lead";
 
 interface LeadTableProps {
   leads: Lead[];
   isLoading?: boolean;
+  canDelete?: boolean;
 }
 
 const columnHelper = createColumnHelper<Lead>();
@@ -33,7 +36,21 @@ function getConsentBadgeMeta(status: Lead["consent_status"]): {
   return { label: "Inconnu", variant: "outline" };
 }
 
-export function LeadTable({ leads, isLoading }: LeadTableProps) {
+export function LeadTable({ leads, isLoading, canDelete = false }: LeadTableProps) {
+  const deleteMutation = useDeleteLead();
+
+  const handleDelete = (lead: Lead) => {
+    if (typeof window === "undefined") return;
+    const confirmed = window.confirm(
+      `Supprimer definitivement le lead "${lead.company_name}" ?`,
+    );
+    if (!confirmed) return;
+    deleteMutation.mutate(lead.id, {
+      onSuccess: () => toast.success("Lead supprime."),
+      onError: () => toast.error("Impossible de supprimer ce lead."),
+    });
+  };
+
   const columns = useMemo<ColumnDef<Lead, unknown>[]>(
     () => [
       columnHelper.accessor("company_name", {
@@ -118,16 +135,30 @@ export function LeadTable({ leads, isLoading }: LeadTableProps) {
         id: "actions",
         header: "",
         cell: (info) => (
-          <Link
-            href={`/leads/${info.row.original.id}`}
-            className="text-slate-400 hover:text-primary"
-          >
-            <ExternalLink className="h-4 w-4" />
-          </Link>
+          <div className="flex items-center justify-end gap-2">
+            <Link
+              href={`/leads/${info.row.original.id}`}
+              className="text-slate-400 hover:text-primary"
+              title="Ouvrir la fiche"
+            >
+              <ExternalLink className="h-4 w-4" />
+            </Link>
+            {canDelete && (
+              <button
+                type="button"
+                onClick={() => handleDelete(info.row.original)}
+                className="text-slate-400 hover:text-danger disabled:opacity-50"
+                disabled={deleteMutation.isPending}
+                title="Supprimer ce lead"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         ),
       }) as ColumnDef<Lead, unknown>,
     ],
-    []
+    [canDelete, deleteMutation.isPending]
   );
 
   const table = useReactTable({

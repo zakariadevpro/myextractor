@@ -32,11 +32,13 @@ from app.schemas.lead_consent import LeadConsentResponse, LeadConsentUpdate
 from app.services.audit_log_service import AuditLogService
 from app.services.b2c_intake_service import B2CIntakeService
 from app.services.permission_service import PermissionService
+from app.services.scoring_service import ScoringService
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
 ALLOWED_LEAD_SORT_COLUMNS = {
     "created_at": Lead.created_at,
+    "updated_at": Lead.updated_at,
     "quality_score": Lead.quality_score,
     "company_name": Lead.company_name,
     "city": Lead.city,
@@ -131,6 +133,8 @@ def _extract_row_value(
 
 def _apply_filters(query, filters: LeadFilters, org_id: uuid.UUID):
     query = query.where(Lead.organization_id == org_id)
+    if filters.extraction_job_id:
+        query = query.where(Lead.extraction_job_id == filters.extraction_job_id)
     if filters.min_score is not None:
         query = query.where(Lead.quality_score >= filters.min_score)
     if filters.max_score is not None:
@@ -253,6 +257,7 @@ async def _require_permission(
 async def list_leads(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    extraction_job_id: uuid.UUID | None = None,
     min_score: int | None = None,
     max_score: int | None = None,
     sector: str | None = None,
@@ -266,7 +271,7 @@ async def list_leads(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     search: str | None = None,
-    sort_by: str = "created_at",
+    sort_by: str = "updated_at",
     sort_order: str = "desc",
     ordering: str | None = None,
     current_user: User = Depends(get_current_user),
@@ -278,6 +283,7 @@ async def list_leads(
         sort_by = ordering.lstrip("-")
 
     filters = LeadFilters(
+        extraction_job_id=extraction_job_id,
         min_score=min_score,
         max_score=max_score,
         sector=sector,
@@ -310,9 +316,9 @@ async def list_leads(
     # Sort
     sort_col = ALLOWED_LEAD_SORT_COLUMNS.get(sort_by, Lead.created_at)
     if sort_order == "desc":
-        base_query = base_query.order_by(sort_col.desc())
+        base_query = base_query.order_by(sort_col.desc(), Lead.created_at.desc())
     else:
-        base_query = base_query.order_by(sort_col.asc())
+        base_query = base_query.order_by(sort_col.asc(), Lead.created_at.desc())
 
     # Paginate
     offset = (page - 1) * page_size
@@ -330,6 +336,7 @@ async def list_leads(
 
 @router.get("/export/csv")
 async def export_leads_csv(
+    extraction_job_id: uuid.UUID | None = None,
     min_score: int | None = None,
     sector: str | None = None,
     city: str | None = None,
@@ -340,6 +347,7 @@ async def export_leads_csv(
 ):
     await _require_permission(db, current_user, "leads.export")
     filters = LeadFilters(
+        extraction_job_id=extraction_job_id,
         min_score=min_score,
         sector=sector,
         city=city,
@@ -373,6 +381,7 @@ async def export_leads_csv(
         details={
             "filters": {
                 "min_score": min_score,
+                "extraction_job_id": str(extraction_job_id) if extraction_job_id else None,
                 "sector": sector,
                 "city": city,
                 "lead_kind": lead_kind,
@@ -439,6 +448,7 @@ async def export_leads_csv(
 
 @router.get("/export/xlsx")
 async def export_leads_xlsx(
+    extraction_job_id: uuid.UUID | None = None,
     min_score: int | None = None,
     sector: str | None = None,
     city: str | None = None,
@@ -449,6 +459,7 @@ async def export_leads_xlsx(
 ):
     await _require_permission(db, current_user, "leads.export")
     filters = LeadFilters(
+        extraction_job_id=extraction_job_id,
         min_score=min_score,
         sector=sector,
         city=city,
@@ -482,6 +493,7 @@ async def export_leads_xlsx(
         details={
             "filters": {
                 "min_score": min_score,
+                "extraction_job_id": str(extraction_job_id) if extraction_job_id else None,
                 "sector": sector,
                 "city": city,
                 "lead_kind": lead_kind,
@@ -686,13 +698,13 @@ async def intake_b2c_csv(
     if not has_full_name_mapping and not has_split_name_mapping:
         raise BadRequestError("Mapping requires full_name or first_name + last_name")
 
-    MAX_CSV_SIZE = 10 * 1024 * 1024  # 10 MB
+    max_csv_size = 10 * 1024 * 1024  # 10 MB
     chunks = []
     total_size = 0
     while chunk := await file.read(64 * 1024):
         total_size += len(chunk)
-        if total_size > MAX_CSV_SIZE:
-            raise BadRequestError(f"CSV file too large (max {MAX_CSV_SIZE // (1024 * 1024)} MB)")
+        if total_size > max_csv_size:
+            raise BadRequestError(f"CSV file too large (max {max_csv_size // (1024 * 1024)} MB)")
         chunks.append(chunk)
     content_bytes = b"".join(chunks)
     if not content_bytes:
@@ -970,6 +982,36 @@ async def get_lead(
     if not lead:
         raise NotFoundError("Lead not found")
     return LeadResponse.model_validate(lead)
+
+
+@router.get("/{lead_id}/score-breakdown")
+async def get_lead_score_breakdown(
+    lead_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _require_permission(db, current_user, "leads.view")
+    result = await db.execute(
+        select(Lead)
+        .options(selectinload(Lead.emails), selectinload(Lead.phones))
+        .where(Lead.id == lead_id, Lead.organization_id == current_user.organization_id)
+    )
+    lead = result.scalar_one_or_none()
+    if not lead:
+        raise NotFoundError("Lead not found")
+
+    scoring = ScoringService(db)
+    profile = await scoring.get_profile_config(lead.organization_id)
+    breakdown = scoring.calculate_score_breakdown(lead, profile.weights)
+    return {
+        "lead_id": str(lead.id),
+        "stored_score": lead.quality_score,
+        "computed_score": breakdown["score"],
+        "raw_total": breakdown["raw_total"],
+        "high_threshold": profile.high_threshold,
+        "medium_threshold": profile.medium_threshold,
+        "items": breakdown["items"],
+    }
 
 
 @router.patch("/{lead_id}", response_model=LeadResponse)

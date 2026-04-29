@@ -4,6 +4,12 @@ import {
   Users,
   Search,
   Settings,
+  CreditCard,
+  Shield,
+  KeyRound,
+  Workflow,
+  Gauge,
+  UserCog,
   type LucideIcon,
 } from "lucide-react";
 import type { UserRole } from "@/types/user";
@@ -13,12 +19,20 @@ export const APP_NAME = "Winaity Extractor";
 export const APP_DESCRIPTION =
   "Plateforme d'extraction de leads B2B/B2C intelligente";
 
+export interface NavChild {
+  label: string;
+  href: string;
+  icon?: LucideIcon;
+  minRole?: UserRole;
+}
+
 export interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
   minRole?: UserRole;
   section: "pilotage" | "operations" | "administration";
+  children?: NavChild[];
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -53,6 +67,14 @@ export const NAV_ITEMS: NavItem[] = [
     href: "/settings",
     icon: Settings,
     section: "administration",
+    children: [
+      { label: "Facturation", href: "/settings/billing", icon: CreditCard, minRole: "admin" },
+      { label: "Equipe", href: "/settings/team", icon: UserCog, minRole: "admin" },
+      { label: "Permissions", href: "/settings/permissions-matrix", icon: Shield, minRole: "admin" },
+      { label: "Cles API", href: "/settings/api-keys", icon: KeyRound, minRole: "admin" },
+      { label: "Workflows", href: "/settings/workflows", icon: Workflow, minRole: "admin" },
+      { label: "Scoring", href: "/settings/scoring", icon: Gauge, minRole: "admin" },
+    ],
   },
 ];
 

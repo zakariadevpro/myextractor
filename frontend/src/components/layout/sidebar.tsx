@@ -2,12 +2,118 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Zap, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Zap, X, ChevronRight } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useUsage } from "@/hooks/use-subscriptions";
 import { hasMinimumRole } from "@/lib/authz";
 import { cn } from "@/lib/utils";
-import { APP_NAME, NAV_ITEMS } from "@/lib/constants";
+import { APP_NAME, NAV_ITEMS, type NavItem } from "@/lib/constants";
+import type { UserRole } from "@/types/user";
+
+function NavRow({
+  item,
+  pathname,
+  userRole,
+  onNavigate,
+}: {
+  item: NavItem;
+  pathname: string;
+  userRole?: UserRole;
+  onNavigate: () => void;
+}) {
+  const isActive =
+    pathname === item.href ||
+    (item.href !== "/dashboard" && pathname.startsWith(item.href));
+  const Icon = item.icon;
+  const allowedChildren = (item.children ?? []).filter(
+    (child) => !child.minRole || hasMinimumRole(userRole, child.minRole),
+  );
+  const hasChildren = allowedChildren.length > 0;
+  const [open, setOpen] = useState<boolean>(isActive && hasChildren);
+
+  useEffect(() => {
+    if (isActive && hasChildren) setOpen(true);
+  }, [isActive, hasChildren]);
+
+  return (
+    <div>
+      <div
+        className={cn(
+          "flex items-center gap-1 rounded-lg pr-1 transition-colors",
+          isActive
+            ? "bg-primary-50 text-primary-700"
+            : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+        )}
+      >
+        <Link
+          href={item.href}
+          onClick={onNavigate}
+          className="flex flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium"
+        >
+          <Icon
+            className={cn(
+              "h-5 w-5 flex-shrink-0",
+              isActive ? "text-primary" : "text-slate-400",
+            )}
+          />
+          {item.label}
+        </Link>
+        {hasChildren && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen((prev) => !prev);
+            }}
+            aria-expanded={open}
+            aria-label={`${open ? "Masquer" : "Afficher"} les sous-pages de ${item.label}`}
+            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          >
+            <ChevronRight
+              className={cn(
+                "h-4 w-4 transition-transform",
+                open && "rotate-90",
+              )}
+            />
+          </button>
+        )}
+      </div>
+
+      {hasChildren && open && (
+        <div className="ml-7 mt-1 space-y-0.5 border-l border-border pl-2">
+          {allowedChildren.map((child) => {
+            const ChildIcon = child.icon;
+            const childActive = pathname === child.href;
+            return (
+              <Link
+                key={child.href}
+                href={child.href}
+                onClick={onNavigate}
+                className={cn(
+                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                  childActive
+                    ? "bg-primary-50 text-primary-700"
+                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-900",
+                )}
+              >
+                {ChildIcon && (
+                  <ChildIcon
+                    className={cn(
+                      "h-3.5 w-3.5 flex-shrink-0",
+                      childActive ? "text-primary" : "text-slate-400",
+                    )}
+                  />
+                )}
+                {child.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface SidebarProps {
   isOpen: boolean;
@@ -75,34 +181,15 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                   {sectionLabels[section]}
                 </p>
-                {items.map((item) => {
-                  const isActive =
-                    pathname === item.href ||
-                    (item.href !== "/dashboard" && pathname.startsWith(item.href));
-                  const Icon = item.icon;
-
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={onClose}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                        isActive
-                          ? "bg-primary-50 text-primary-700"
-                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                      )}
-                    >
-                      <Icon
-                        className={cn(
-                          "h-5 w-5 flex-shrink-0",
-                          isActive ? "text-primary" : "text-slate-400"
-                        )}
-                      />
-                      {item.label}
-                    </Link>
-                  );
-                })}
+                {items.map((item) => (
+                  <NavRow
+                    key={item.href}
+                    item={item}
+                    pathname={pathname}
+                    userRole={user?.role}
+                    onNavigate={onClose}
+                  />
+                ))}
               </div>
             );
           })}

@@ -45,6 +45,7 @@ export default function AuditPage() {
   const [resourceType, setResourceType] = useState("");
 
   const canAccess = hasMinimumRole(user?.role, "manager");
+  const isSuperAdmin = user?.role === "super_admin";
   const { data: summary, isLoading: summaryLoading } = useAuditSummary(sinceHours);
   const { data: logs, isLoading: logsLoading } = useAuditLogs({
     page,
@@ -88,7 +89,14 @@ export default function AuditPage() {
       <PageHeader
         title="Audit & Securite"
         description="Tracabilite des actions sensibles sur ton CRM d'extraction."
-        badges={<Badge variant="success">Monitor actif</Badge>}
+        badges={
+          <>
+            <Badge variant="success">Monitor actif</Badge>
+            {isSuperAdmin && (
+              <Badge variant="warning">Vue cross-org (super_admin)</Badge>
+            )}
+          </>
+        }
         actions={
           <Select
             className="w-40"
@@ -209,19 +217,24 @@ export default function AuditPage() {
                     <th className="px-3 py-2 text-left font-medium text-slate-600">Date</th>
                     <th className="px-3 py-2 text-left font-medium text-slate-600">Action</th>
                     <th className="px-3 py-2 text-left font-medium text-slate-600">Ressource</th>
+                    {isSuperAdmin && (
+                      <th className="px-3 py-2 text-left font-medium text-slate-600">
+                        Organisation
+                      </th>
+                    )}
                     <th className="px-3 py-2 text-left font-medium text-slate-600">Actor</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border bg-white">
                   {logsLoading ? (
                     <tr>
-                      <td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">
+                      <td colSpan={isSuperAdmin ? 5 : 4} className="px-3 py-6 text-center text-muted-foreground">
                         Chargement des logs...
                       </td>
                     </tr>
                   ) : (logs?.items ?? []).length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">
+                      <td colSpan={isSuperAdmin ? 5 : 4} className="px-3 py-6 text-center text-muted-foreground">
                         Aucun log trouve.
                       </td>
                     </tr>
@@ -238,8 +251,28 @@ export default function AuditPage() {
                           {item.resource_type}
                           {item.resource_id ? `:${item.resource_id.slice(0, 8)}` : ""}
                         </td>
+                        {isSuperAdmin && (
+                          <td className="px-3 py-2 text-slate-700">
+                            {item.organization_name || (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                        )}
                         <td className="px-3 py-2 text-slate-700">
-                          {item.actor_user_id ? item.actor_user_id.slice(0, 8) : "system"}
+                          {item.actor_user_id ? (
+                            <div className="flex flex-col">
+                              <span className="font-medium text-slate-900">
+                                {item.actor_name || "Utilisateur supprime"}
+                              </span>
+                              {item.actor_email && (
+                                <span className="text-xs text-muted-foreground">
+                                  {item.actor_email}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">Systeme</span>
+                          )}
                         </td>
                       </tr>
                     ))

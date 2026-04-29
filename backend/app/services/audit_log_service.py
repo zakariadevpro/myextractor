@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
 from app.models.extraction import ExtractionJob
+from app.models.organization import Organization
+from app.models.user import User
 
 
 class AuditLogService:
@@ -35,15 +37,30 @@ class AuditLogService:
     async def list_logs(
         self,
         *,
-        organization_id: uuid.UUID,
+        organization_id: uuid.UUID | None,
         page: int = 1,
         page_size: int = 20,
         action: str | None = None,
         resource_type: str | None = None,
         actor_user_id: uuid.UUID | None = None,
-    ) -> tuple[list[AuditLog], int]:
+    ) -> tuple[list[dict], int]:
+        """List audit logs.
+
+        organization_id=None means cross-tenant (super_admin only): return logs
+        from every organization.
+        """
         offset = (page - 1) * page_size
-        query = select(AuditLog).where(AuditLog.organization_id == organization_id)
+        # Left-join users + organizations so logs without an actor (system
+        # events) still come through, with actor/org info nullable when missing.
+        query = (
+            select(AuditLog, User, Organization)
+            .outerjoin(User, AuditLog.actor_user_id == User.id)
+            .outerjoin(
+                Organization, AuditLog.organization_id == Organization.id
+            )
+        )
+        if organization_id is not None:
+            query = query.where(AuditLog.organization_id == organization_id)
         if action:
             query = query.where(AuditLog.action == action)
         if resource_type:
@@ -51,24 +68,63 @@ class AuditLogService:
         if actor_user_id:
             query = query.where(AuditLog.actor_user_id == actor_user_id)
 
-        count_query = select(func.count()).select_from(query.subquery())
+        count_query = select(func.count()).select_from(AuditLog)
+        if organization_id is not None:
+            count_query = count_query.where(AuditLog.organization_id == organization_id)
+        if action:
+            count_query = count_query.where(AuditLog.action == action)
+        if resource_type:
+            count_query = count_query.where(AuditLog.resource_type == resource_type)
+        if actor_user_id:
+            count_query = count_query.where(AuditLog.actor_user_id == actor_user_id)
+
         total = (await self.db.execute(count_query)).scalar() or 0
         result = await self.db.execute(
             query.order_by(AuditLog.created_at.desc()).offset(offset).limit(page_size)
         )
-        return result.scalars().all(), total
+        items: list[dict] = []
+        for log_entry, user, org in result.all():
+            items.append(
+                {
+                    "id": log_entry.id,
+                    "organization_id": log_entry.organization_id,
+                    "organization_name": org.name if org else None,
+                    "actor_user_id": log_entry.actor_user_id,
+                    "actor_name": user.full_name if user else None,
+                    "actor_email": user.email if user else None,
+                    "action": log_entry.action,
+                    "resource_type": log_entry.resource_type,
+                    "resource_id": log_entry.resource_id,
+                    "details": log_entry.details,
+                    "created_at": log_entry.created_at,
+                }
+            )
+        return items, total
 
-    async def summary(self, *, organization_id: uuid.UUID, since_hours: int = 24) -> dict:
+    async def summary(
+        self, *, organization_id: uuid.UUID | None, since_hours: int = 24
+    ) -> dict:
+        """Aggregate stats. organization_id=None means cross-tenant (super_admin)."""
         since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+        scoped_filter = (
+            (AuditLog.organization_id == organization_id,)
+            if organization_id is not None
+            else ()
+        )
+        scoped_extraction_filter = (
+            (ExtractionJob.organization_id == organization_id,)
+            if organization_id is not None
+            else ()
+        )
         base = select(AuditLog).where(
-            AuditLog.organization_id == organization_id,
+            *scoped_filter,
             AuditLog.created_at >= since,
         )
         total_q = select(func.count()).select_from(base.subquery())
         total = (await self.db.execute(total_q)).scalar() or 0
 
         actors_q = select(func.count(distinct(AuditLog.actor_user_id))).where(
-            AuditLog.organization_id == organization_id,
+            *scoped_filter,
             AuditLog.created_at >= since,
             AuditLog.actor_user_id.is_not(None),
         )
@@ -77,7 +133,7 @@ class AuditLogService:
         action_q = (
             select(AuditLog.action, func.count().label("count"))
             .where(
-                AuditLog.organization_id == organization_id,
+                *scoped_filter,
                 AuditLog.created_at >= since,
             )
             .group_by(AuditLog.action)
@@ -87,7 +143,7 @@ class AuditLogService:
         action_rows = (await self.db.execute(action_q)).all()
 
         extraction_where = (
-            ExtractionJob.organization_id == organization_id,
+            *scoped_extraction_filter,
             ExtractionJob.created_at >= since,
         )
         total_jobs = (
@@ -144,10 +200,17 @@ class AuditLogService:
                 )
             )
         ).scalar() or 0.0
+        org_clause = (
+            "AND organization_id = :org_id" if organization_id is not None else ""
+        )
+        sql_params: dict = {"since": since}
+        if organization_id is not None:
+            sql_params["org_id"] = organization_id
+
         filtered_out_total = (
             await self.db.execute(
                 text(
-                    """
+                    f"""
                     SELECT COALESCE(
                       SUM(
                         COALESCE(
@@ -159,46 +222,46 @@ class AuditLogService:
                       0
                     )
                     FROM audit_logs
-                    WHERE organization_id = :org_id
-                      AND action = 'extraction.analytics'
+                    WHERE action = 'extraction.analytics'
                       AND created_at >= :since
+                      {org_clause}
                     """
                 ),
-                {"org_id": organization_id, "since": since},
+                sql_params,
             )
         ).scalar() or 0
         classified_b2b_total = (
             await self.db.execute(
                 text(
-                    """
+                    f"""
                     SELECT COALESCE(
                       SUM(COALESCE(NULLIF(details->>'classified_b2b', '')::int, 0)),
                       0
                     )
                     FROM audit_logs
-                    WHERE organization_id = :org_id
-                      AND action = 'extraction.analytics'
+                    WHERE action = 'extraction.analytics'
                       AND created_at >= :since
+                      {org_clause}
                     """
                 ),
-                {"org_id": organization_id, "since": since},
+                sql_params,
             )
         ).scalar() or 0
         classified_b2c_total = (
             await self.db.execute(
                 text(
-                    """
+                    f"""
                     SELECT COALESCE(
                       SUM(COALESCE(NULLIF(details->>'classified_b2c', '')::int, 0)),
                       0
                     )
                     FROM audit_logs
-                    WHERE organization_id = :org_id
-                      AND action = 'extraction.analytics'
+                    WHERE action = 'extraction.analytics'
                       AND created_at >= :since
+                      {org_clause}
                     """
                 ),
-                {"org_id": organization_id, "since": since},
+                sql_params,
             )
         ).scalar() or 0
 
