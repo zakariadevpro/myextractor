@@ -3,6 +3,8 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+.env.local
+.env.*.local
 *.log
 playwright-report/
 test-results/
@@ -12,3 +14,28 @@ package.json.bak
 src_node_backup/
 tests/*.bak
 winxtract.egg-info/
+
+# Frontend (Next.js)
+node_modules/
+.next/
+*.tsbuildinfo
+next-env.d.ts
+
+# Python build artefacts
+*.egg-info/
+build/
+dist/
+
+# Worker runtime files
+celerybeat-schedule*
+pytest-cache-files-*/
+
+# Local dev scripts (not for the repo)
+backend/_seed.py
+backend/_reset_pwd.py
+backend/seed_db.py
+scripts/_reset_pwd.py
+scripts/_seed_in_container.py
+
+# Misc local files
+docs/presentation-sources-leads.html
