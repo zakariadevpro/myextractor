@@ -196,7 +196,109 @@ def _canonical_website(raw_url: str | None) -> str | None:
     return f"{scheme}://{netloc}{path}"
 
 
+_PLACEHOLDER_EMAIL_DOMAINS = {
+    "example.com",
+    "example.fr",
+    "example.org",
+    "exemple.com",
+    "exemple.fr",
+    "test.com",
+    "test.fr",
+    "domain.com",
+    "email.com",
+    "yourdomain.com",
+    "votredomaine.com",
+    "monsite.com",
+    "monsite.fr",
+}
+
+_PLACEHOLDER_EMAIL_LOCALPARTS = {
+    "email",
+    "yourname",
+    "your-name",
+    "votre-email",
+    "votreemail",
+    "votrenom",
+    "name",
+    "nom",
+    "prenom",
+    "firstname",
+    "lastname",
+    "user",
+    "username",
+    "test",
+    "exemple",
+    "example",
+    "demo",
+    "xxx",
+    "abc",
+    "azerty",
+    "qwerty",
+}
+
+_DISPOSABLE_EMAIL_DOMAINS = {
+    "10minutemail.com",
+    "guerrillamail.com",
+    "guerrillamail.net",
+    "yopmail.com",
+    "mailinator.com",
+    "tempmail.com",
+    "trashmail.com",
+    "throwaway.email",
+    "sharklasers.com",
+    "getnada.com",
+    "fakemailgenerator.com",
+    "maildrop.cc",
+    "dispostable.com",
+}
+
+
+def _email_is_placeholder(email: str) -> bool:
+    """Detect obvious placeholder/fake emails.
+
+    Why: scrapers sometimes pick up template strings like "email@exemple.com"
+    or "test@test.com" that are syntactically valid but not real contacts.
+    Marking them invalid keeps them visible (for debugging) but they are
+    excluded from the email-validity dashboard ratio.
+    """
+    value = (email or "").strip().lower()
+    if "@" not in value:
+        return True
+    local, _, domain = value.partition("@")
+    if not local or not domain:
+        return True
+    if domain in _PLACEHOLDER_EMAIL_DOMAINS:
+        return True
+    if domain in _DISPOSABLE_EMAIL_DOMAINS:
+        return True
+    if local in _PLACEHOLDER_EMAIL_LOCALPARTS:
+        return True
+    # very low entropy local part (only repeated chars)
+    if len(set(local)) == 1 and len(local) >= 3:
+        return True
+    return False
+
+
+def _classify_email(email: str) -> bool:
+    """Return True when the email passes basic validity checks (level 1 + 4).
+
+    Currently runs syntax (regex) + placeholder/disposable detection. Does
+    not perform DNS/MX or SMTP probing.
+    """
+    value = (email or "").strip().lower()
+    if not value or not EMAIL_RE.match(value):
+        return False
+    if _email_is_placeholder(value):
+        return False
+    return True
+
+
 def _clean_email_list(emails: list[str]) -> list[str]:
+    """Keep all syntactically valid emails (placeholders included).
+
+    Placeholder detection is done downstream at insert time via
+    _classify_email, so they reach the DB but with is_valid=False.
+    """
     cleaned: list[str] = []
     seen: set[str] = set()
     for email in emails:
@@ -912,6 +1014,84 @@ def _apply_workflow_actions(lead_row: dict, actions: dict) -> dict:
     return updates
 
 
+def _run_post_extraction_dedupe(db, organization_id: str) -> dict:
+    """Compute is_duplicate (exact) and is_similar (variant) flags.
+
+    Two passes over the leads of the org:
+      1. Group by (LOWER(BTRIM(name)), LOWER(BTRIM(city))) — exact duplicates.
+         Mark every member of a >=2 group as is_duplicate=True.
+      2. Group by aggressive normalized key (accents stripped, legal suffixes
+         dropped). Mark every member of a >=2 group as is_similar=True --
+         except those already in an exact-duplicate group (no double label).
+
+    Returns counts: {"duplicates": N, "similars": M}.
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT id, company_name, city
+            FROM leads
+            WHERE organization_id = CAST(:org_id AS uuid)
+            """
+        ),
+        {"org_id": organization_id},
+    ).fetchall()
+
+    exact_groups: dict[str, list[str]] = {}
+    similar_groups: dict[str, list[str]] = {}
+    for row in rows:
+        name_raw = (row.company_name or "").strip().lower()
+        city_raw = (row.city or "").strip().lower()
+        if name_raw:
+            exact_groups.setdefault(f"{name_raw}|{city_raw}", []).append(
+                str(row.id)
+            )
+
+        company_key = _normalize_company_for_key(row.company_name or "")
+        if company_key:
+            city_key = _normalize_city_for_key(row.city)
+            similar_groups.setdefault(f"{company_key}|{city_key}", []).append(
+                str(row.id)
+            )
+
+    duplicate_ids: set[str] = {
+        lead_id for ids in exact_groups.values() if len(ids) >= 2 for lead_id in ids
+    }
+    similar_ids: set[str] = {
+        lead_id
+        for ids in similar_groups.values()
+        if len(ids) >= 2
+        for lead_id in ids
+    } - duplicate_ids
+
+    db.execute(
+        text(
+            """
+            UPDATE leads
+            SET is_duplicate = false, is_similar = false
+            WHERE organization_id = CAST(:org_id AS uuid)
+              AND (is_duplicate = true OR is_similar = true)
+            """
+        ),
+        {"org_id": organization_id},
+    )
+    if duplicate_ids:
+        db.execute(
+            text(
+                "UPDATE leads SET is_duplicate = true WHERE id::text = ANY(:ids)"
+            ),
+            {"ids": list(duplicate_ids)},
+        )
+    if similar_ids:
+        db.execute(
+            text(
+                "UPDATE leads SET is_similar = true WHERE id::text = ANY(:ids)"
+            ),
+            {"ids": list(similar_ids)},
+        )
+    return {"duplicates": len(duplicate_ids), "similars": len(similar_ids)}
+
+
 def _run_post_extraction_workflows(db, organization_id: str, job_id: str) -> dict:
     workflow_rows = (
         db.execute(
@@ -1195,41 +1375,24 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                 is_duplicate=False,
                 weights=scoring_weights,
             )
-            quality_score_dup = _compute_initial_quality(
-                scraped,
-                source=source,
-                is_duplicate=True,
-                weights=scoring_weights,
-            )
 
+            # Plain INSERT (no upsert). The unique index has been removed so
+            # exact duplicates can co-exist; the post-extraction dedupe pass
+            # flags is_duplicate / is_similar based on Python normalization.
             result = db.execute(
                 text("""
                     INSERT INTO leads (
                         id, organization_id, extraction_job_id, company_name,
                         siren, naf_code, sector, website, address, postal_code,
-                        city, department, region, country, source, source_url, lead_kind, is_duplicate, quality_score
+                        city, department, region, country, source, source_url, lead_kind,
+                        is_duplicate, is_similar, quality_score
                     ) VALUES (
                         :id, :org_id, :job_id, :name,
                         :siren, :naf, :sector, :website, :address, :postal,
-                        :city, :dept, :region, 'FR', :source, :source_url, :lead_kind, false, :quality_score_new
+                        :city, :dept, :region, 'FR', :source, :source_url, :lead_kind,
+                        false, false, :quality_score_new
                     )
-                    ON CONFLICT (organization_id, LOWER(company_name), LOWER(COALESCE(city, '')))
-                    DO UPDATE SET
-                        is_duplicate = true,
-                        quality_score = :quality_score_dup,
-                        extraction_job_id = CAST(:job_id AS uuid),
-                        siren = COALESCE(leads.siren, EXCLUDED.siren),
-                        naf_code = COALESCE(leads.naf_code, EXCLUDED.naf_code),
-                        sector = COALESCE(leads.sector, EXCLUDED.sector),
-                        website = COALESCE(leads.website, EXCLUDED.website),
-                        address = COALESCE(leads.address, EXCLUDED.address),
-                        postal_code = COALESCE(leads.postal_code, EXCLUDED.postal_code),
-                        department = COALESCE(leads.department, EXCLUDED.department),
-                        region = COALESCE(leads.region, EXCLUDED.region),
-                        source_url = COALESCE(leads.source_url, EXCLUDED.source_url),
-                        lead_kind = COALESCE(NULLIF(leads.lead_kind, ''), EXCLUDED.lead_kind),
-                        updated_at = NOW()
-                    RETURNING id, (xmax = 0) AS inserted
+                    RETURNING id, true AS inserted
                 """),
                 {
                     "id": lead_id,
@@ -1249,7 +1412,6 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                     "source_url": scraped.source_url or None,
                     "lead_kind": detected_lead_kind,
                     "quality_score_new": quality_score_new,
-                    "quality_score_dup": quality_score_dup,
                 },
             )
             row = result.first()
@@ -1286,7 +1448,7 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                         "id": str(uuid.uuid4()),
                         "lead_id": lead_id,
                         "email": email,
-                        "is_valid": True,
+                        "is_valid": _classify_email(email),
                     },
                 )
 
@@ -1347,6 +1509,19 @@ def execute_scraping(self, job_id: str, target_kind: str = "both"):
                 },
             )
             db.commit()
+
+        # Auto-dedupe: classify exact duplicates and similar variants.
+        dedupe_counts = _run_post_extraction_dedupe(
+            db, organization_id=str(job["organization_id"])
+        )
+        if dedupe_counts["duplicates"] or dedupe_counts["similars"]:
+            logger.info(
+                "Auto-dedupe job=%s exact_duplicates=%d similars=%d",
+                job_id,
+                dedupe_counts["duplicates"],
+                dedupe_counts["similars"],
+            )
+        db.commit()
 
         workflow_summary = _run_post_extraction_workflows(
             db,

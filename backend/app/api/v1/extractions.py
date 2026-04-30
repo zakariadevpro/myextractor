@@ -13,6 +13,7 @@ from app.models.user import User
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.extraction import ExtractionCreate, ExtractionResponse
 from app.services.audit_log_service import AuditLogService
+from app.services.cleaning_service import CleaningService
 from app.services.extraction_service import ExtractionService
 from app.services.permission_service import PermissionService
 
@@ -211,6 +212,13 @@ async def delete_extraction(
     job_id_str = str(job.id)
     await db.delete(job)
     await db.flush()
+
+    # Recompute is_duplicate / is_similar flags so survivors that lost their
+    # twins go back to "unique". Otherwise the card keeps showing stale flags
+    # set by the auto-dedupe at extraction time.
+    if delete_leads and leads_deleted > 0:
+        await CleaningService(db).deduplicate(current_user.organization_id)
+
     await AuditLogService(db).log(
         action="extraction.delete",
         organization_id=current_user.organization_id,

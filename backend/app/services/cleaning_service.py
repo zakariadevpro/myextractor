@@ -14,10 +14,16 @@ class CleaningService:
         self.db = db
 
     async def deduplicate(self, org_id: uuid.UUID) -> int:
-        """Mark duplicates based on normalized company_name + normalized city."""
-        # Recompute dedup state from scratch for consistency after each extraction batch.
+        """Recompute is_duplicate (exact same name+city) and is_similar
+        (variant via aggressive normalization) flags for the org.
+
+        Returns the total number of leads that ended up flagged
+        (duplicates + similars).
+        """
         await self.db.execute(
-            update(Lead).where(Lead.organization_id == org_id).values(is_duplicate=False)
+            update(Lead)
+            .where(Lead.organization_id == org_id)
+            .values(is_duplicate=False, is_similar=False)
         )
 
         result = await self.db.execute(
@@ -27,33 +33,62 @@ class CleaningService:
         )
         rows = result.all()
 
-        first_seen_by_key: dict[tuple[str, str], uuid.UUID] = {}
-        duplicate_ids: list[uuid.UUID] = []
-
+        exact_groups: dict[tuple[str, str], list[uuid.UUID]] = {}
+        similar_groups: dict[tuple[str, str], list[uuid.UUID]] = {}
         for lead_id, company_name, city in rows:
-            key = (clean_company_name(company_name or ""), clean_text(city or "").upper())
-            if not key[0]:
-                continue
-            if key in first_seen_by_key:
-                duplicate_ids.append(lead_id)
-            else:
-                first_seen_by_key[key] = lead_id
+            name_raw = (company_name or "").strip().lower()
+            city_raw = (city or "").strip().lower()
+            if name_raw:
+                exact_groups.setdefault((name_raw, city_raw), []).append(lead_id)
+            similar_key = (
+                clean_company_name(company_name or ""),
+                clean_text(city or "").upper(),
+            )
+            if similar_key[0]:
+                similar_groups.setdefault(similar_key, []).append(lead_id)
 
-        if not duplicate_ids:
-            return 0
+        duplicate_ids: set[uuid.UUID] = {
+            lead_id
+            for ids in exact_groups.values()
+            if len(ids) >= 2
+            for lead_id in ids
+        }
+        similar_ids: set[uuid.UUID] = {
+            lead_id
+            for ids in similar_groups.values()
+            if len(ids) >= 2
+            for lead_id in ids
+        } - duplicate_ids
 
-        marked = await self.db.execute(
-            update(Lead).where(Lead.id.in_(duplicate_ids)).values(is_duplicate=True)
-        )
-        return marked.rowcount or 0
+        if duplicate_ids:
+            await self.db.execute(
+                update(Lead)
+                .where(Lead.id.in_(duplicate_ids))
+                .values(is_duplicate=True)
+            )
+        if similar_ids:
+            await self.db.execute(
+                update(Lead)
+                .where(Lead.id.in_(similar_ids))
+                .values(is_similar=True)
+            )
 
-    async def validate_emails(self, org_id: uuid.UUID) -> int:
-        """Validate all unvalidated emails for leads in the org."""
-        result = await self.db.execute(
-            select(LeadEmail)
-            .join(Lead)
-            .where(Lead.organization_id == org_id, LeadEmail.is_valid.is_(None))
-        )
+        return len(duplicate_ids) + len(similar_ids)
+
+    async def validate_emails(
+        self, org_id: uuid.UUID, *, only_unvalidated: bool = False
+    ) -> int:
+        """Re-classify is_valid for emails in the org.
+
+        only_unvalidated=True keeps the original behaviour (touch only rows
+        with is_valid IS NULL). False (default) re-classifies every row, so
+        that placeholder emails inserted before the validator was tightened
+        get correctly marked as invalid.
+        """
+        query = select(LeadEmail).join(Lead).where(Lead.organization_id == org_id)
+        if only_unvalidated:
+            query = query.where(LeadEmail.is_valid.is_(None))
+        result = await self.db.execute(query)
         emails = result.scalars().all()
 
         validated = 0

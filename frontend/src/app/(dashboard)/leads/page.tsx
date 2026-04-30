@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { CircleDot, Download, Filter, Layers, Trash2, X } from "lucide-react";
+import { CircleDot, Copy, Download, Filter, Layers, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,8 @@ import { SuggestedSegments } from "@/components/features/leads/suggested-segment
 import {
   useLeads,
   useExportLeads,
-  useRemoveDuplicates,
+  useLeadsStats,
+  useRemoveExactDuplicates,
   useSuggestedSegments,
 } from "@/hooks/use-leads";
 import { useExtractions } from "@/hooks/use-extraction";
@@ -33,9 +34,27 @@ export default function LeadsPage() {
   const canManageLeads = hasMinimumRole(user?.role, "manager");
 
   const { data, isLoading } = useLeads(filters);
+  const { data: stats } = useLeadsStats(filters);
   const { data: suggestedSegments } = useSuggestedSegments();
   const exportMutation = useExportLeads();
-  const removeDuplicatesMutation = useRemoveDuplicates();
+  const removeExactDuplicatesMutation = useRemoveExactDuplicates();
+
+  const handleRemoveExactDuplicates = async () => {
+    if (typeof window === "undefined") return;
+    if (
+      !window.confirm(
+        "Supprimer definitivement les doublons exacts (meme nom + ville) ? La premiere occurrence est conservee.",
+      )
+    ) {
+      return;
+    }
+    try {
+      const result = await removeExactDuplicatesMutation.mutateAsync();
+      toast.success(result.message || "Doublons exacts supprimes.");
+    } catch {
+      toast.error("Erreur lors de la suppression des doublons.");
+    }
+  };
   const { data: extractionsData } = useExtractions({
     page: 1,
     page_size: 50,
@@ -94,15 +113,6 @@ export default function LeadsPage() {
     }
   };
 
-  const handleRemoveDuplicates = async () => {
-    try {
-      const result = await removeDuplicatesMutation.mutateAsync();
-      toast.success(result.message || "Deduplication terminee.");
-    } catch {
-      toast.error("Erreur lors de la suppression des doublons.");
-    }
-  };
-
   const handlePageChange = (page: number) => {
     setFilters((prev) => ({ ...prev, page }));
   };
@@ -110,12 +120,11 @@ export default function LeadsPage() {
   const totalPages = data?.total_pages ?? 0;
   const currentPage = data?.page ?? 1;
   const leads = data?.items ?? [];
-  const avgScore = leads.length
-    ? Math.round(leads.reduce((acc, lead) => acc + lead.quality_score, 0) / leads.length)
-    : 0;
-  const duplicates = leads.filter((lead) => lead.is_duplicate).length;
-  const withContacts = leads.filter((lead) => lead.emails.length > 0 || lead.phones.length > 0).length;
-  const contactCoverage = leads.length ? Math.round((withContacts / leads.length) * 100) : 0;
+  // Aggregates come from /leads/stats (computed server-side over the full
+  // filtered set), not from the 20 leads of the current page.
+  const avgScore = stats?.avg_score ?? 0;
+  const duplicates = stats?.duplicates ?? 0;
+  const contactCoverage = stats?.contact_coverage ?? 0;
 
   return (
     <div className="space-y-6">
@@ -157,12 +166,13 @@ export default function LeadsPage() {
               </Button>
               <Button
                 variant="outline"
-                className="gap-2"
-                onClick={handleRemoveDuplicates}
-                isLoading={removeDuplicatesMutation.isPending}
+                className="gap-2 border-danger/40 text-danger hover:bg-danger/10"
+                onClick={handleRemoveExactDuplicates}
+                isLoading={removeExactDuplicatesMutation.isPending}
+                disabled={duplicates === 0}
               >
                 <Trash2 className="h-4 w-4" />
-                Dedoublonner
+                Dedoubler ({duplicates})
               </Button>
             </>
           ) : null
@@ -178,21 +188,21 @@ export default function LeadsPage() {
         />
         <MetricCard
           label="Score Moyen"
-          value={avgScore}
-          helper="Qualite moyenne sur 100"
+          value={Number(avgScore.toFixed(1))}
+          helper="Sur tous les leads filtres / 100"
           icon={<CircleDot className="h-4 w-4" />}
         />
         <MetricCard
           label="Couverture Contact"
-          value={`${contactCoverage}%`}
-          helper="Au moins email ou telephone"
+          value={`${contactCoverage.toFixed(1)}%`}
+          helper="Email ou telephone, sur l'ensemble filtre"
           icon={<Filter className="h-4 w-4" />}
         />
         <MetricCard
-          label="Doublons Detectes"
+          label="Doublons"
           value={duplicates}
-          helper="Sur la page courante"
-          icon={<Trash2 className="h-4 w-4" />}
+          helper="Memes nom + ville"
+          icon={<Copy className="h-4 w-4" />}
         />
       </div>
 

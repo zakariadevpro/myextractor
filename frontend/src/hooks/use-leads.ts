@@ -35,6 +35,8 @@ export function useLeads(filters: LeadFilters = {}) {
         params.set("has_phone", String(filters.has_phone));
       if (filters.is_duplicate !== undefined)
         params.set("is_duplicate", String(filters.is_duplicate));
+      if (filters.is_similar !== undefined)
+        params.set("is_similar", String(filters.is_similar));
       if (filters.consent_granted_only !== undefined)
         params.set("consent_granted_only", String(filters.consent_granted_only));
       if (filters.page) params.set("page", String(filters.page));
@@ -46,6 +48,55 @@ export function useLeads(filters: LeadFilters = {}) {
       );
       return response.data;
     },
+  });
+}
+
+export interface LeadsStats {
+  total: number;
+  avg_score: number;
+  duplicates: number;
+  duplicate_rate: number;
+  similars: number;
+  with_email: number;
+  with_phone: number;
+  with_contact: number;
+  contact_coverage: number;
+}
+
+export function useLeadsStats(filters: LeadFilters = {}) {
+  return useQuery<LeadsStats>({
+    queryKey: ["leads", "stats", filters],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filters.extraction_job_id)
+        params.set("extraction_job_id", filters.extraction_job_id);
+      if (filters.search) params.set("search", filters.search);
+      if (filters.lead_kind) params.set("lead_kind", filters.lead_kind);
+      if (filters.sector) params.set("sector", filters.sector);
+      if (filters.city) params.set("city", filters.city);
+      if (filters.min_score !== undefined)
+        params.set("min_score", String(filters.min_score));
+      if (filters.max_score !== undefined)
+        params.set("max_score", String(filters.max_score));
+      if (filters.date_from) params.set("date_from", filters.date_from);
+      if (filters.date_to) params.set("date_to", filters.date_to);
+      if (filters.has_email !== undefined)
+        params.set("has_email", String(filters.has_email));
+      if (filters.has_phone !== undefined)
+        params.set("has_phone", String(filters.has_phone));
+      if (filters.is_duplicate !== undefined)
+        params.set("is_duplicate", String(filters.is_duplicate));
+      if (filters.is_similar !== undefined)
+        params.set("is_similar", String(filters.is_similar));
+      if (filters.consent_granted_only !== undefined)
+        params.set("consent_granted_only", String(filters.consent_granted_only));
+
+      const response = await apiClient.get<LeadsStats>(
+        `/leads/stats?${params.toString()}`,
+      );
+      return response.data;
+    },
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -200,6 +251,40 @@ export function useRemoveDuplicates() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+}
+
+export function useRemoveExactDuplicates() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post<{ message: string }>(
+        "/leads/remove-duplicates",
+      );
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useRevalidateEmails() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post<{ message: string }>(
+        "/leads/revalidate-emails",
+      );
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
 }

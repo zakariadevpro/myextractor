@@ -29,6 +29,7 @@ export interface Lead {
   source: string;
   source_url: string | null;
   is_duplicate: boolean;
+  is_similar: boolean;
   consent_status: ConsentStatus;
   emails: LeadEmail[];
   phones: LeadPhone[];
@@ -53,6 +54,7 @@ export interface LeadFilters {
   has_email?: boolean;
   has_phone?: boolean;
   is_duplicate?: boolean;
+  is_similar?: boolean;
   consent_granted_only?: boolean;
   source?: string;
   page?: number;

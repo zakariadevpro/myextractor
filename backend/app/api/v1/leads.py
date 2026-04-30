@@ -31,6 +31,7 @@ from app.schemas.lead import (
 from app.schemas.lead_consent import LeadConsentResponse, LeadConsentUpdate
 from app.services.audit_log_service import AuditLogService
 from app.services.b2c_intake_service import B2CIntakeService
+from app.services.cleaning_service import CleaningService
 from app.services.permission_service import PermissionService
 from app.services.scoring_service import ScoringService
 
@@ -157,6 +158,8 @@ def _apply_filters(query, filters: LeadFilters, org_id: uuid.UUID):
         query = query.where(Lead.phones.any() if filters.has_phone else ~Lead.phones.any())
     if filters.is_duplicate is not None:
         query = query.where(Lead.is_duplicate == filters.is_duplicate)
+    if filters.is_similar is not None:
+        query = query.where(Lead.is_similar == filters.is_similar)
     if filters.consent_granted_only:
         query = query.where(Lead.consent.has(LeadConsent.consent_status == "granted"))
     if filters.date_from:
@@ -253,6 +256,91 @@ async def _require_permission(
     await PermissionService(db).require_user_permission(current_user, permission)
 
 
+@router.get("/stats")
+async def get_leads_stats(
+    extraction_job_id: uuid.UUID | None = None,
+    min_score: int | None = None,
+    max_score: int | None = None,
+    sector: str | None = None,
+    city: str | None = None,
+    department: str | None = None,
+    region: str | None = None,
+    source: str | None = None,
+    lead_kind: Literal["b2b", "b2c"] | None = None,
+    is_duplicate: bool | None = None,
+    is_similar: bool | None = None,
+    consent_granted_only: bool | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    search: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregate metrics over the full filtered set (not just the current page).
+
+    Why: the leads page used to compute averages over the 20 visible rows,
+    which was misleading on big result sets. This endpoint runs the same
+    filters as the list endpoint and returns totals + averages computed
+    server-side.
+    """
+    await _require_permission(db, current_user, "leads.view")
+    filters = LeadFilters(
+        extraction_job_id=extraction_job_id,
+        min_score=min_score,
+        max_score=max_score,
+        sector=sector,
+        city=city,
+        department=department,
+        region=region,
+        source=source,
+        lead_kind=lead_kind,
+        is_duplicate=is_duplicate,
+        is_similar=is_similar,
+        consent_granted_only=consent_granted_only,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+    )
+    base = _apply_filters(select(Lead.id), filters, current_user.organization_id)
+    base_subq = base.subquery()
+
+    stats_q = select(
+        func.count().label("total"),
+        func.coalesce(
+            func.avg(Lead.quality_score).filter(Lead.quality_score > 0), 0
+        ).label("avg_score"),
+        func.count().filter(Lead.is_duplicate).label("duplicates"),
+        func.count().filter(Lead.is_similar).label("similars"),
+        func.count().filter(Lead.emails.any()).label("with_email"),
+        func.count().filter(Lead.phones.any()).label("with_phone"),
+        func.count().filter(or_(Lead.emails.any(), Lead.phones.any())).label(
+            "with_contact"
+        ),
+    ).where(Lead.id.in_(select(base_subq.c.id)))
+
+    row = (await db.execute(stats_q)).one()
+    total = int(row.total or 0)
+    duplicates = int(row.duplicates or 0)
+    similars = int(row.similars or 0)
+    with_contact = int(row.with_contact or 0)
+    with_email = int(row.with_email or 0)
+    with_phone = int(row.with_phone or 0)
+    contact_coverage = (with_contact / total * 100) if total else 0.0
+    duplicate_rate = (duplicates / total * 100) if total else 0.0
+
+    return {
+        "total": total,
+        "avg_score": round(float(row.avg_score or 0), 1),
+        "duplicates": duplicates,
+        "duplicate_rate": round(duplicate_rate, 1),
+        "similars": similars,
+        "with_email": with_email,
+        "with_phone": with_phone,
+        "with_contact": with_contact,
+        "contact_coverage": round(contact_coverage, 1),
+    }
+
+
 @router.get("", response_model=PaginatedResponse[LeadResponse])
 async def list_leads(
     page: int = Query(1, ge=1),
@@ -267,6 +355,7 @@ async def list_leads(
     source: str | None = None,
     lead_kind: Literal["b2b", "b2c"] | None = None,
     is_duplicate: bool | None = None,
+    is_similar: bool | None = None,
     consent_granted_only: bool | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
@@ -293,6 +382,7 @@ async def list_leads(
         source=source,
         lead_kind=lead_kind,
         is_duplicate=is_duplicate,
+        is_similar=is_similar,
         consent_granted_only=consent_granted_only,
         date_from=date_from,
         date_to=date_to,
@@ -313,9 +403,16 @@ async def list_leads(
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    # Sort
+    # Sort. When filtering duplicates, group by company_name first so
+    # original + copies appear next to each other in the table.
     sort_col = ALLOWED_LEAD_SORT_COLUMNS.get(sort_by, Lead.created_at)
-    if sort_order == "desc":
+    if filters.is_duplicate is True or filters.is_similar is True:
+        # Group identical/variant leads side-by-side for comparison.
+        base_query = base_query.order_by(
+            func.lower(func.btrim(Lead.company_name)).asc(),
+            Lead.created_at.desc(),
+        )
+    elif sort_order == "desc":
         base_query = base_query.order_by(sort_col.desc(), Lead.created_at.desc())
     else:
         base_query = base_query.order_by(sort_col.asc(), Lead.created_at.desc())
@@ -1056,6 +1153,9 @@ async def delete_lead(
     lead_company_name = lead.company_name
     await db.delete(lead)
     await db.flush()
+    # Recompute flags so survivors whose only twin was this lead lose their
+    # is_duplicate / is_similar flag.
+    await CleaningService(db).deduplicate(current_user.organization_id)
     await AuditLogService(db).log(
         action="lead.delete",
         organization_id=current_user.organization_id,
@@ -1072,8 +1172,8 @@ async def deduplicate_leads(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Recompute is_duplicate / is_similar flags for the org."""
     await _require_permission(db, current_user, "leads.manage")
-    from app.services.cleaning_service import CleaningService
 
     service = CleaningService(db)
     count = await service.deduplicate(current_user.organization_id)
@@ -1082,6 +1182,90 @@ async def deduplicate_leads(
         organization_id=current_user.organization_id,
         actor_user_id=current_user.id,
         resource_type="lead",
-        details={"duplicates_marked": count},
+        details={"flagged_marked": count},
     )
-    return MessageResponse(message=f"{count} duplicates marked")
+    return MessageResponse(message=f"{count} doublons/similaires reclassifies")
+
+
+@router.post("/remove-duplicates", response_model=MessageResponse)
+async def remove_exact_duplicates(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete redundant rows in exact-duplicate groups, keeping the oldest one.
+
+    "Exact" = same LOWER(BTRIM(company_name)) + LOWER(BTRIM(city)). The first
+    inserted lead per group is preserved (with its emails/phones/consent),
+    every subsequent identical row is dropped.
+    """
+    await _require_permission(db, current_user, "leads.manage")
+    rows = (
+        await db.execute(
+            select(Lead.id, Lead.company_name, Lead.city, Lead.created_at)
+            .where(Lead.organization_id == current_user.organization_id)
+            .order_by(Lead.created_at.asc(), Lead.id.asc())
+        )
+    ).all()
+
+    seen: dict[tuple[str, str], uuid.UUID] = {}
+    delete_ids: list[uuid.UUID] = []
+    for lead_id, company_name, city, _ in rows:
+        key = (
+            (company_name or "").strip().lower(),
+            (city or "").strip().lower(),
+        )
+        if not key[0]:
+            continue
+        if key in seen:
+            delete_ids.append(lead_id)
+        else:
+            seen[key] = lead_id
+
+    deleted = 0
+    if delete_ids:
+        result = await db.execute(
+            select(Lead).where(Lead.id.in_(delete_ids))
+        )
+        for lead in result.scalars().unique():
+            await db.delete(lead)
+            deleted += 1
+        await db.flush()
+
+    # Recompute flags on the remaining rows.
+    cleaning = CleaningService(db)
+    await cleaning.deduplicate(current_user.organization_id)
+
+    await AuditLogService(db).log(
+        action="lead.remove_duplicates",
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        resource_type="lead",
+        details={"deleted": deleted},
+    )
+    return MessageResponse(message=f"{deleted} doublons exacts supprimes")
+
+
+@router.post("/revalidate-emails", response_model=MessageResponse)
+async def revalidate_emails(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-run is_valid classification on every email of the org.
+
+    Useful after tightening the validator (placeholder/disposable detection)
+    so that emails like email@exemple.com inserted as is_valid=True before
+    get correctly flagged as invalid.
+    """
+    await _require_permission(db, current_user, "leads.manage")
+    service = CleaningService(db)
+    count = await service.validate_emails(
+        current_user.organization_id, only_unvalidated=False
+    )
+    await AuditLogService(db).log(
+        action="lead.revalidate_emails",
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.id,
+        resource_type="lead",
+        details={"emails_revalidated": count},
+    )
+    return MessageResponse(message=f"{count} emails reclassifies")

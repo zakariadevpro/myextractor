@@ -56,12 +56,23 @@ export function LeadTable({ leads, isLoading, canDelete = false }: LeadTableProp
       columnHelper.accessor("company_name", {
         header: "Entreprise",
         cell: (info) => (
-          <Link
-            href={`/leads/${info.row.original.id}`}
-            className="font-medium text-slate-900 hover:text-primary"
-          >
-            {info.getValue()}
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/leads/${info.row.original.id}`}
+              className="font-medium text-slate-900 hover:text-primary"
+            >
+              {info.getValue()}
+            </Link>
+            {info.row.original.is_duplicate && (
+              <Badge
+                variant="danger"
+                className="px-1.5 py-0 text-[10px]"
+                title="Doublon exact: meme nom + ville qu'un autre lead"
+              >
+                Doublon
+              </Badge>
+            )}
+          </div>
         ),
       }) as ColumnDef<Lead, unknown>,
       columnHelper.accessor("lead_kind", {

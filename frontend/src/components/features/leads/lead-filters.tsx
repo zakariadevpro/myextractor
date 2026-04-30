@@ -54,6 +54,11 @@ export function LeadFiltersBar({
     { value: "b2b", label: "B2B uniquement" },
     { value: "b2c", label: "B2C uniquement" },
   ];
+  const duplicateOptions = [
+    { value: "", label: "Tous" },
+    { value: "true", label: "Doublons uniquement" },
+    { value: "false", label: "Sans doublons" },
+  ];
   const extractionOptions = useMemo(() => {
     const items = extractionsData?.items ?? [];
     const activeId = filters.extraction_job_id;
@@ -188,7 +193,24 @@ export function LeadFiltersBar({
             })
           }
         />
-        <div className="lg:col-span-3">
+        <Select
+          label="Doublons"
+          options={duplicateOptions}
+          value={
+            localFilters.is_duplicate === undefined
+              ? ""
+              : String(localFilters.is_duplicate)
+          }
+          onChange={(e) => {
+            const v = e.target.value;
+            setLocalFilters({
+              ...localFilters,
+              is_duplicate:
+                v === "true" ? true : v === "false" ? false : undefined,
+            });
+          }}
+        />
+        <div className="lg:col-span-2">
           <Select
             label="Extraction"
             options={extractionOptions}
